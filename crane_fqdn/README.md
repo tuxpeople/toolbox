@@ -25,7 +25,7 @@ Dieses Script erfasst automatisch alle diese Endpunkte durch Analyse des `crane 
 1. Script herunterladen:
 
    ```bash
-   curl -o crane_fqdn.sh https://raw.githubusercontent.com/tuxpeople/toolbox/crane_fqdn/crane_fqdn.sh
+   curl -o crane_fqdn.sh https://raw.githubusercontent.com/tuxpeople/toolbox/main/crane_fqdn/crane_fqdn.sh
    chmod +x crane_fqdn.sh
    ```
 
@@ -206,13 +206,9 @@ Für detaillierte Ausgabe der crane-Logs:
 crane -v pull nginx:latest /tmp/test.tgz
 ```
 
-## 📝 Lizenz
-
-MIT License - Frei verwendbar für alle Zwecke.
-
 ## 🤝 Beitragen
 
-Verbesserungen und Bug-Fixes sind willkommen!
+Verbesserungen und Bug-Fixes sind willkommen! Siehe [Haupt-Repository](../) für Details zur Lizenz.
 
 ## 📚 Siehe auch
 
