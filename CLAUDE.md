@@ -154,15 +154,20 @@ find . -name "*.sh" -exec shellcheck {} \;
 4. **README.md** entsprechend aktualisieren
 5. **Haupt-README.md** bei strukturellen Änderungen anpassen
 
-### Bei neuen Tools
+### Bei neuen Tools (ZWINGEND - ALLE Schritte erforderlich!)
 1. **Eigenen Ordner** erstellen: `tool_name/`
 2. **Ausführbares Script:** `tool_name` (OHNE .sh Endung!)
 3. **Script executable machen:** `chmod +x tool_name/tool_name`
-4. **Vollständige README.md** nach obiger Struktur erstellen
-5. **Haupt-README.md** erweitern (Tool hinzufügen)
+4. **ZWINGEND: README.md erstellen** nach obiger Struktur im tool_name/ Ordner
+5. **ZWINGEND: Haupt-README.md erweitern:**
+   - Tool in "Verfügbare Tools" Sektion hinzufügen
+   - Beispiel in "Schnellstart" Sektion hinzufügen
+   - Eintrag in "Tool-Status" Tabelle hinzufügen
+   - Abhängigkeiten in "Abhängigkeiten" Tabelle hinzufügen
 6. **Sicherheitshinweise** hinzufügen (Haupt-README und Tool-README)
-7. **Abhängigkeiten-Tabelle** aktualisieren
-8. **macOS/Linux Kompatibilität** testen und sicherstellen
+7. **macOS/Linux Kompatibilität** testen und sicherstellen
+
+⚠️ **WICHTIG:** Ohne vollständige README.md (sowohl Tool-README als auch Haupt-README-Updates) ist ein Tool NICHT vollständig und darf nicht als fertig betrachtet werden!
 
 ## ⚠️ Wichtige Beachtungen
 
@@ -195,8 +200,12 @@ Ein Tool gilt als "✅ Ready" wenn:
 - ✅ **Executable-Rechte** gesetzt
 - ✅ **macOS/Linux kompatibel** (getestet)
 - ✅ **Schweizer Rechtschreibung** (kein ß)
-- ✅ **Vollständig dokumentiert** (README.md nach Standard-Struktur)
-- ✅ **Haupt-README** aktualisiert (Tool aufgeführt)
+- ✅ **Tool-README.md** vollständig nach Standard-Struktur erstellt
+- ✅ **Haupt-README** komplett aktualisiert:
+  - ✅ Tool in "Verfügbare Tools" aufgeführt
+  - ✅ Beispiel in "Schnellstart" hinzugefügt
+  - ✅ Eintrag in "Tool-Status" Tabelle
+  - ✅ Abhängigkeiten in "Abhängigkeiten" Tabelle
 - ✅ **Sicherheitshinweise** hinzugefügt (wo nötig)
 - ✅ **Error-Handling** implementiert
 - ✅ **Dry-Run Modus** verfügbar (`--dry-run`, `-n`)
@@ -205,7 +214,9 @@ Ein Tool gilt als "✅ Ready" wenn:
 - ✅ **Portable Implementation** (BSD/GNU-Tools berücksichtigt)
 - ✅ **Beispiele getestet** und funktional
 
+🚨 **KRITISCH:** Ohne vollständige Dokumentation (Tool-README + Haupt-README Updates) ist ein Tool NICHT fertig!
+
 ---
 
 **Letzte Aktualisierung:** 2025-08-23  
-**Version:** 1.1 - Erweitert um Schweizer Standards und strikte Organisationsregeln
+**Version:** 1.2 - Verschärfte README-Anforderungen nach yt-get Erfahrung
