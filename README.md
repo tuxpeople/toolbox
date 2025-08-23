@@ -9,6 +9,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 ### Development & Build
 - **[brewfile-commenter](./brewfile-commenter/)** - Fügt automatisch Beschreibungen zu Brewfile-Einträgen hinzu
+- **[lima-k8s](./lima-k8s/)** - Lima-basierte Kubernetes und k3s Cluster für lokale Entwicklung
 - **[serve_this](./serve_this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
 
 ### Network & SSH
@@ -49,6 +50,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd k8s_vuln
    ./k8s_vuln.sh CVE-2021-44228
    
+   # Lima Kubernetes Cluster starten
+   cd lima-k8s
+   ./lima-k8s start k8s
+   
    # Lokalen HTTPS-Server starten
    cd serve_this
    ./serve_this
@@ -66,6 +71,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 🍺 brewfile-commenter | ✅ **Ready** | Brewfile Beschreibungs-Generator |
 | 🔑 fix-ssh-key | ✅ **Ready** | SSH Known Hosts Reparatur |
 | 🛡️ k8s_vuln | ✅ **Ready** | Kubernetes Vulnerability Scanner |
+| 🚀 lima-k8s | ✅ **Ready** | Lima-basierte Kubernetes/k3s Cluster Manager |
 | 🌐 serve_this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
 | 🛠️ fix-perms | ✅ **Ready** | macOS Permissions Reparatur-Tool |
 | 📡 udm_backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
@@ -140,6 +146,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | brewfile-commenter | `brew`, `jq` | `brew install jq` |
 | fix-ssh-key | `ssh-keygen`, `ssh-keyscan` | Meist vorinstalliert |
 | k8s_vuln | `trivy`, `kubectl` | `brew install trivy kubectl` |
+| lima-k8s | `lima` | `brew install lima` |
 | serve_this | `python3`, `openssl` | Meist vorinstalliert |
 | udm_backup | `ssh`, `scp`, `jq` | `brew install jq` |
 
