@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+
+# Script: fix-perms.sh
+# Zweck: Repariert macOS Benutzer-Verzeichnis Berechtigungen
+# Verwendung: ./fix-perms.sh [options]
+
+set -euo pipefail
+
+# Farben für Output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Funktionen für farbigen Output
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Hilfe anzeigen
+show_help() {
+    cat << EOF
+macOS User Directory Permissions Repair Tool
+
+VERWENDUNG:
+    $0 [options]
+
+BESCHREIBUNG:
+    Repariert Berechtigungen für macOS-Benutzerverzeichnisse. Stellt die
+    Standard-Berechtigungen für ~/home-Ordner wieder her.
+
+OPTIONEN:
+    -u, --user USERNAME        Spezifischen Benutzer reparieren
+    -d, --directory PATH       Spezifisches Verzeichnis reparieren
+    --dry-run                  Nur anzeigen, was gemacht würde
+    --reset-umask              Benutzer-umask zurücksetzen
+    --fix-acls                 ACLs (Access Control Lists) zurücksetzen
+    -v, --verbose              Detaillierte Ausgabe
+    -h, --help                 Diese Hilfe anzeigen
+
+BEISPIELE:
+    $0                         # Aktueller Benutzer automatisch
+    $0 -u john                 # Benutzer 'john'
+    $0 -d /Users/john/Documents # Spezifischer Ordner
+    $0 --dry-run               # Nur Vorschau
+    $0 --verbose               # Mit detaillierter Ausgabe
+
+SICHERHEIT:
+    - Benötigt sudo-Rechte für Eigentümer-Änderungen
+    - Erstellt automatisch Backup-Information
+    - Arbeitet nur mit Standard-macOS-Benutzerverzeichnissen
+
+EOF
+}
+
+# macOS-System prüfen
+check_macos() {
+    if [[ "$(uname)" != "Darwin" ]]; then
+        log_error "Dieses Script funktioniert nur unter macOS"
+        exit 1
+    fi
+}
+
+# Benutzer-Informationen ermitteln
+get_user_info() {
+    local username="$1"
+    local user_info=()
+    
+    # Prüfen ob Benutzer existiert
+    if ! id "$username" &>/dev/null; then
+        log_error "Benutzer '$username' existiert nicht"
+        return 1
+    fi
+    
+    # Benutzer-Informationen sammeln
+    local uid=$(id -u "$username")
+    local gid=$(id -g "$username")
+    local home_dir=$(dscl . -read "/Users/$username" NFSHomeDirectory | cut -d' ' -f2)
+    
+    # Standard-Gruppe für macOS (staff = GID 20)
+    local primary_group="staff"
+    local primary_gid=20
+    
+    echo "$uid:$primary_gid:$home_dir"
+}
+
+# Aktueller Console-Benutzer
+get_console_user() {
+    stat -f %Su /dev/console 2>/dev/null || echo "$USER"
+}
+
+# Backup der aktuellen Berechtigungen erstellen
+create_permissions_backup() {
+    local target_dir="$1"
+    local backup_file="/tmp/permissions_backup_$(date +%Y%m%d_%H%M%S).txt"
+    
+    log_info "Erstelle Backup der aktuellen Berechtigungen..."
+    
+    if find "$target_dir" -exec ls -la {} \; > "$backup_file" 2>/dev/null; then
+        log_success "Backup erstellt: $backup_file"
+        echo "$backup_file"
+    else
+        log_warn "Konnte kein vollständiges Backup erstellen"
+        echo ""
+    fi
+}
+
+# Standard macOS Verzeichnis-Berechtigungen
+get_standard_permissions() {
+    local dir_type="$1"
+    
+    case "$dir_type" in
+        "home")
+            echo "755"  # rwxr-xr-x für Home-Verzeichnis
+            ;;
+        "user_dirs")
+            echo "755"  # rwxr-xr-x für Benutzer-Unterverzeichnisse
+            ;;
+        "private")
+            echo "700"  # rwx------ für private Verzeichnisse
+            ;;
+        "files")
+            echo "644"  # rw-r--r-- für normale Dateien
+            ;;
+        "executables")
+            echo "755"  # rwxr-xr-x für ausführbare Dateien
+            ;;
+        *)
+            echo "644"  # Standard für Dateien
+            ;;
+    esac
+}
+
+# ACLs (Access Control Lists) zurücksetzen
+reset_acls() {
+    local target_path="$1"
+    local verbose="$2"
+    
+    log_info "Setze ACLs zurück für: $target_path"
+    
+    if [[ "$verbose" == "true" ]]; then
+        sudo chmod -R -N "$target_path"
+    else
+        sudo chmod -R -N "$target_path" 2>/dev/null || true
+    fi
+}
+
+# Berechtigungen für Verzeichnis reparieren
+fix_directory_permissions() {
+    local target_dir="$1"
+    local owner_uid="$2"
+    local owner_gid="$3"
+    local dry_run="$4"
+    local verbose="$5"
+    local fix_acls="$6"
+    
+    log_info "Repariere Berechtigungen für: $target_dir"
+    
+    if [[ ! -d "$target_dir" ]]; then
+        log_error "Verzeichnis nicht gefunden: $target_dir"
+        return 1
+    fi
+    
+    # Backup erstellen
+    local backup_file
+    if [[ "$dry_run" == "false" ]]; then
+        backup_file=$(create_permissions_backup "$target_dir")
+    fi
+    
+    # Eigentümer korrigieren
+    log_info "Setze Eigentümer auf $owner_uid:$owner_gid"
+    if [[ "$dry_run" == "true" ]]; then
+        echo "DRY-RUN: sudo chown -R $owner_uid:$owner_gid '$target_dir'"
+    else
+        if [[ "$verbose" == "true" ]]; then
+            sudo chown -R -v "$owner_uid:$owner_gid" "$target_dir"
+        else
+            sudo chown -R "$owner_uid:$owner_gid" "$target_dir"
+        fi
+    fi
+    
+    # ACLs zurücksetzen (falls gewünscht)
+    if [[ "$fix_acls" == "true" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            echo "DRY-RUN: sudo chmod -R -N '$target_dir'"
+        else
+            reset_acls "$target_dir" "$verbose"
+        fi
+    fi
+    
+    # Standard-Berechtigungen setzen
+    log_info "Setze Standard-Berechtigungen"
+    
+    # Home-Verzeichnis: 755
+    if [[ "$dry_run" == "true" ]]; then
+        echo "DRY-RUN: sudo chmod 755 '$target_dir'"
+    else
+        sudo chmod 755 "$target_dir"
+    fi
+    
+    # Unterverzeichnisse und Dateien
+    if [[ "$dry_run" == "true" ]]; then
+        echo "DRY-RUN: sudo find '$target_dir' -type d -exec chmod 755 {} \\;"
+        echo "DRY-RUN: sudo find '$target_dir' -type f -exec chmod 644 {} \\;"
+    else
+        # Verzeichnisse: 755
+        sudo find "$target_dir" -type d -exec chmod 755 {} \;
+        
+        # Dateien: 644
+        sudo find "$target_dir" -type f -exec chmod 644 {} \;
+        
+        # Ausführbare Dateien beibehalten
+        sudo find "$target_dir" -type f -perm +111 -exec chmod 755 {} \;
+    fi
+    
+    # Private Verzeichnisse speziell behandeln
+    local private_dirs=(".ssh" ".gnupg" ".aws" ".kube")
+    for private_dir in "${private_dirs[@]}"; do
+        local full_private_path="$target_dir/$private_dir"
+        if [[ -d "$full_private_path" ]]; then
+            if [[ "$dry_run" == "true" ]]; then
+                echo "DRY-RUN: sudo chmod -R 700 '$full_private_path'"
+            else
+                log_info "Setze restriktive Berechtigungen für: $private_dir"
+                sudo chmod -R 700 "$full_private_path"
+            fi
+        fi
+    done
+    
+    if [[ "$dry_run" == "false" ]]; then
+        log_success "Berechtigungen repariert für: $target_dir"
+        if [[ -n "$backup_file" ]]; then
+            log_info "Backup verfügbar: $backup_file"
+        fi
+    fi
+}
+
+# Benutzer-umask zurücksetzen
+reset_user_umask() {
+    local username="$1"
+    local dry_run="$2"
+    
+    log_info "Setze umask für Benutzer $username zurück"
+    
+    if [[ "$dry_run" == "true" ]]; then
+        echo "DRY-RUN: sudo launchctl config user umask 027"
+    else
+        if sudo launchctl config user umask 027; then
+            log_success "umask auf 027 gesetzt (neue Sessions)"
+        else
+            log_warn "Konnte umask nicht setzen - eventuell bereits konfiguriert"
+        fi
+    fi
+}
+
+# Disk Utility Permissions Reset
+reset_disk_permissions() {
+    local username="$1"
+    local uid="$2"
+    local dry_run="$3"
+    
+    log_info "Führe systemweite Berechtigungs-Reparatur durch"
+    
+    if [[ "$dry_run" == "true" ]]; then
+        echo "DRY-RUN: sudo diskutil resetUserPermissions / $uid"
+    else
+        log_warn "Dies kann einige Minuten dauern..."
+        if sudo diskutil resetUserPermissions / "$uid"; then
+            log_success "Systemweite Berechtigungen zurückgesetzt"
+        else
+            log_warn "Diskutil-Reset fehlgeschlagen - möglicherweise nicht nötig"
+        fi
+    fi
+}
+
+# Hauptfunktion
+main() {
+    local username=""
+    local target_directory=""
+    local dry_run="false"
+    local verbose="false"
+    local reset_umask="false"
+    local fix_acls="false"
+    local disk_reset="false"
+    
+    # Argumentverarbeitung
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -u|--user)
+                username="$2"
+                shift 2
+                ;;
+            -d|--directory)
+                target_directory="$2"
+                shift 2
+                ;;
+            --dry-run)
+                dry_run="true"
+                shift
+                ;;
+            --reset-umask)
+                reset_umask="true"
+                shift
+                ;;
+            --fix-acls)
+                fix_acls="true"
+                shift
+                ;;
+            --disk-reset)
+                disk_reset="true"
+                shift
+                ;;
+            -v|--verbose)
+                verbose="true"
+                shift
+                ;;
+            -*)
+                log_error "Unbekannte Option: $1"
+                echo "Verwendung: $0 [options]"
+                exit 1
+                ;;
+            *)
+                log_error "Unerwartetes Argument: $1"
+                exit 1
+                ;;
+        esac
+    done
+    
+    # macOS-System prüfen
+    check_macos
+    
+    # Benutzer bestimmen
+    if [[ -z "$username" ]]; then
+        username=$(get_console_user)
+        log_info "Verwende aktuellen Console-Benutzer: $username"
+    fi
+    
+    # Benutzer-Informationen abrufen
+    local user_info
+    if ! user_info=$(get_user_info "$username"); then
+        exit 1
+    fi
+    
+    IFS=':' read -r uid gid home_dir <<< "$user_info"
+    
+    # Ziel-Verzeichnis bestimmen
+    if [[ -z "$target_directory" ]]; then
+        target_directory="$home_dir"
+    fi
+    
+    log_info "macOS Berechtigungs-Reparatur gestartet"
+    log_info "Benutzer: $username (UID: $uid, GID: $gid)"
+    log_info "Verzeichnis: $target_directory"
+    
+    if [[ "$dry_run" == "true" ]]; then
+        log_warn "DRY-RUN Modus - keine Änderungen werden vorgenommen"
+    fi
+    
+    # Sicherheitsprüfung
+    if [[ "$target_directory" != "/Users/"* ]]; then
+        log_warn "Warnung: Verzeichnis außerhalb von /Users/"
+        read -p "Trotzdem fortfahren? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Abgebrochen"
+            exit 0
+        fi
+    fi
+    
+    # Hauptreparatur durchführen
+    fix_directory_permissions "$target_directory" "$uid" "$gid" "$dry_run" "$verbose" "$fix_acls"
+    
+    # Optionale Zusatz-Reparaturen
+    if [[ "$reset_umask" == "true" ]]; then
+        reset_user_umask "$username" "$dry_run"
+    fi
+    
+    if [[ "$disk_reset" == "true" ]]; then
+        reset_disk_permissions "$username" "$uid" "$dry_run"
+    fi
+    
+    if [[ "$dry_run" == "false" ]]; then
+        log_success "Berechtigungs-Reparatur abgeschlossen!"
+        log_info "Empfehlung: System neu starten für vollständige Wirkung"
+    else
+        log_info "DRY-RUN abgeschlossen - keine Änderungen vorgenommen"
+    fi
+}
+
+# Script ausführen
+main "$@"

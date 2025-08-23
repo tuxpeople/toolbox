@@ -1,0 +1,659 @@
+#!/usr/bin/env bash
+
+# Script: udm_backup
+# Zweck: Sichert UniFi Dream Machine (UDM) Autobackups und verwaltet lokale Backups
+# Verwendung: ./udm_backup [options]
+
+set -euo pipefail
+
+# Farben für Output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
+
+# Funktionen für farbigen Output
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Step-Counter für Fortschrittsanzeige
+_step_counter=0
+step() {
+    _step_counter=$(( _step_counter + 1 ))
+    printf '\n\033[1;36m%d) %s\033[0m\n' $_step_counter "$@" >&2  # bold cyan
+}
+
+# Standard-Konfiguration
+DEFAULT_UDM_HOST="10.20.30.1"
+DEFAULT_UDM_USER="root"
+DEFAULT_UDM_PORT="22"
+DEFAULT_BACKUP_DIR="$HOME/iCloudDrive/Allgemein/backup/udm"
+DEFAULT_RETENTION_DAYS="30"
+DEFAULT_SSH_KEY=""
+
+# Hilfe anzeigen
+show_help() {
+    cat << EOF
+UniFi Dream Machine Backup Tool
+
+VERWENDUNG:
+    $0 [options]
+
+BESCHREIBUNG:
+    Lädt Autobackups von einer UniFi Dream Machine (UDM) herunter und verwaltet
+    lokale Backup-Aufbewahrung basierend auf der autobackup_meta.json.
+
+OPTIONEN:
+    -H, --host HOST           UDM Host/IP-Adresse (Standard: $DEFAULT_UDM_HOST)
+    -u, --user USER           SSH-Benutzername (Standard: $DEFAULT_UDM_USER)
+    -p, --port PORT           SSH-Port (Standard: $DEFAULT_UDM_PORT)
+    -d, --directory DIR       Lokales Backup-Verzeichnis (Standard: $DEFAULT_BACKUP_DIR)
+    -k, --ssh-key KEY         SSH Private Key Datei (Standard: SSH-Agent/Standard-Keys)
+    -r, --retention DAYS      Backup-Aufbewahrung in Tagen (Standard: $DEFAULT_RETENTION_DAYS)
+    -n, --dry-run             Nur anzeigen was gemacht würde, ohne Änderungen
+    -v, --verbose             Detaillierte Ausgabe
+    --skip-cleanup            Keine lokale Backup-Bereinigung durchführen
+    --skip-download           Kein Download, nur lokale Bereinigung
+    -h, --help                Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    UDM_HOST                  Überschreibt Standard-Host
+    UDM_USER                  Überschreibt Standard-Benutzer
+    UDM_PORT                  Überschreibt Standard-Port
+    UDM_BACKUP_DIR            Überschreibt Standard-Backup-Verzeichnis
+    UDM_SSH_KEY               SSH Private Key Datei
+    UDM_RETENTION_DAYS        Backup-Aufbewahrung in Tagen
+
+BEISPIELE:
+    $0                                    # Standard-Backup
+    $0 -H 192.168.1.1 -u admin           # Andere UDM-Adresse und Benutzer
+    $0 -d /backup/udm                     # Anderes Backup-Verzeichnis
+    $0 -k ~/.ssh/udm_backup_key           # Spezifischer SSH-Key
+    $0 --dry-run                          # Testlauf ohne Änderungen
+    $0 --skip-download                    # Nur lokale Bereinigung
+    $0 -r 7                               # Nur 7 Tage Aufbewahrung
+
+VORAUSSETZUNGEN:
+    - SSH-Zugriff zur UDM
+    - scp verfügbar
+    - jq verfügbar (für JSON-Verarbeitung)
+
+KONFIGURATIONSDATEI:
+    Alternativ kann eine Konfigurationsdatei ~/.udm_backup_config verwendet werden:
+    
+    UDM_HOST=10.20.30.1
+    UDM_USER=root
+    UDM_PORT=22
+    UDM_BACKUP_DIR=/path/to/backup
+    UDM_SSH_KEY=/path/to/ssh/key
+    UDM_RETENTION_DAYS=30
+
+EOF
+}
+
+# Formatiert Dateigröße human-readable
+format_size() {
+    local size="$1"
+    
+    if command -v numfmt &> /dev/null; then
+        numfmt --to=iec "$size" 2>/dev/null || echo "${size} bytes"
+    else
+        # Fallback für Systeme ohne numfmt
+        if [[ $size -lt 1024 ]]; then
+            echo "${size} B"
+        elif [[ $size -lt $((1024 * 1024)) ]]; then
+            echo "$((size / 1024)) KB"
+        elif [[ $size -lt $((1024 * 1024 * 1024)) ]]; then
+            echo "$((size / 1024 / 1024)) MB"
+        else
+            echo "$((size / 1024 / 1024 / 1024)) GB"
+        fi
+    fi
+}
+
+# Abhängigkeiten prüfen
+check_dependencies() {
+    local missing_deps=()
+    
+    if ! command -v scp &> /dev/null; then
+        missing_deps+=("scp (OpenSSH)")
+    fi
+    
+    if ! command -v ssh &> /dev/null; then
+        missing_deps+=("ssh (OpenSSH)")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_info "Installation:"
+        log_info "  macOS: brew install jq"
+        log_info "  Ubuntu/Debian: sudo apt-get install jq openssh-client"
+        exit 1
+    fi
+}
+
+# Konfigurationsdatei laden
+load_config_file() {
+    local config_file="$HOME/.udm_backup_config"
+    
+    if [[ -f "$config_file" ]]; then
+        log_info "Lade Konfiguration aus: $config_file"
+        source "$config_file"
+    fi
+}
+
+# SSH-Verbindung testen
+test_ssh_connection() {
+    local host="$1"
+    local user="$2"
+    local port="$3"
+    local ssh_key="$4"
+    local verbose="$5"
+    
+    log_info "Teste SSH-Verbindung zu $user@$host:$port"
+    
+    local ssh_cmd="ssh"
+    
+    if [[ -n "$ssh_key" ]]; then
+        if [[ ! -f "$ssh_key" ]]; then
+            log_error "SSH-Key nicht gefunden: $ssh_key"
+            return 1
+        fi
+        ssh_cmd="$ssh_cmd -i $ssh_key"
+    fi
+    
+    ssh_cmd="$ssh_cmd -p $port -o ConnectTimeout=10 -o BatchMode=yes"
+    
+    if [[ "$verbose" == "true" ]]; then
+        log_info "SSH-Befehl: $ssh_cmd $user@$host"
+    fi
+    
+    if $ssh_cmd "$user@$host" "echo 'SSH-Verbindung erfolgreich'" 2>/dev/null; then
+        log_success "SSH-Verbindung erfolgreich"
+        return 0
+    else
+        log_error "SSH-Verbindung fehlgeschlagen"
+        log_info "Prüfe:"
+        log_info "  - Host-Adresse: $host"
+        log_info "  - SSH-Port: $port"
+        log_info "  - Benutzername: $user"
+        log_info "  - SSH-Keys und Authentifizierung"
+        return 1
+    fi
+}
+
+# UDM Remote-Backup-Verzeichnis prüfen
+check_udm_backup_dir() {
+    local host="$1"
+    local user="$2"
+    local port="$3"
+    local ssh_key="$4"
+    local verbose="$5"
+    
+    local udm_backup_path="/mnt/data/unifi-os/unifi/data/backup/autobackup"
+    
+    log_info "Prüfe UDM Backup-Verzeichnis: $udm_backup_path"
+    
+    local ssh_cmd="ssh"
+    
+    if [[ -n "$ssh_key" ]]; then
+        ssh_cmd="$ssh_cmd -i $ssh_key"
+    fi
+    
+    ssh_cmd="$ssh_cmd -p $port"
+    
+    if $ssh_cmd "$user@$host" "test -d $udm_backup_path" 2>/dev/null; then
+        log_success "UDM Backup-Verzeichnis gefunden"
+        
+        # Anzahl Backup-Dateien prüfen
+        local backup_count
+        if backup_count=$($ssh_cmd "$user@$host" "ls -1 $udm_backup_path/*.unf 2>/dev/null | wc -l" 2>/dev/null); then
+            log_info "Verfügbare Backup-Dateien: $backup_count"
+            if [[ "$backup_count" -eq 0 ]]; then
+                log_warn "Keine .unf Backup-Dateien gefunden"
+            fi
+        fi
+        
+        return 0
+    else
+        log_error "UDM Backup-Verzeichnis nicht gefunden: $udm_backup_path"
+        log_info "Prüfe ob:"
+        log_info "  - UniFi Controller läuft"
+        log_info "  - Autobackups aktiviert sind"
+        log_info "  - Pfad korrekt ist (UDM Pro vs UDM)"
+        return 1
+    fi
+}
+
+# Lokales Backup-Verzeichnis vorbereiten
+prepare_backup_directory() {
+    local backup_dir="$1"
+    local verbose="$2"
+    
+    step "Bereite lokales Backup-Verzeichnis vor"
+    
+    if [[ ! -d "$backup_dir" ]]; then
+        log_info "Erstelle Backup-Verzeichnis: $backup_dir"
+        if mkdir -p "$backup_dir"; then
+            log_success "Backup-Verzeichnis erstellt"
+        else
+            log_error "Konnte Backup-Verzeichnis nicht erstellen"
+            return 1
+        fi
+    else
+        log_info "Backup-Verzeichnis existiert: $backup_dir"
+    fi
+    
+    # Berechtigung prüfen
+    if [[ ! -w "$backup_dir" ]]; then
+        log_error "Keine Schreibberechtigung für: $backup_dir"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Backups von UDM herunterladen
+download_backups() {
+    local host="$1"
+    local user="$2"
+    local port="$3"
+    local ssh_key="$4"
+    local backup_dir="$5"
+    local dry_run="$6"
+    local verbose="$7"
+    
+    step "Lade Autobackups von UDM herunter"
+    
+    local udm_backup_path="/mnt/data/unifi-os/unifi/data/backup/autobackup"
+    local scp_cmd="scp -p"
+    
+    if [[ -n "$ssh_key" ]]; then
+        scp_cmd="$scp_cmd -i $ssh_key"
+    fi
+    
+    scp_cmd="$scp_cmd -P $port"
+    
+    if [[ "$verbose" == "true" ]]; then
+        scp_cmd="$scp_cmd -v"
+        log_info "SCP-Befehl: $scp_cmd"
+    fi
+    
+    local source_path="$user@$host:$udm_backup_path/*"
+    
+    if [[ "$dry_run" == "true" ]]; then
+        log_info "[DRY-RUN] Würde ausführen: $scp_cmd $source_path $backup_dir/"
+        return 0
+    fi
+    
+    log_info "Lade Dateien herunter von: $host:$udm_backup_path"
+    
+    if $scp_cmd "$source_path" "$backup_dir/" 2>/dev/null; then
+        log_success "Backup-Download abgeschlossen"
+        
+        # Anzahl heruntergeladener Dateien anzeigen
+        local downloaded_files
+        downloaded_files=$(find "$backup_dir" -name "*.unf" -o -name "autobackup_meta.json" | wc -l)
+        log_info "Heruntergeladene Dateien: $downloaded_files"
+        
+        return 0
+    else
+        log_error "Backup-Download fehlgeschlagen"
+        log_info "Mögliche Ursachen:"
+        log_info "  - Keine Backup-Dateien vorhanden"
+        log_info "  - Netzwerkprobleme"
+        log_info "  - Berechtigungsprobleme"
+        return 1
+    fi
+}
+
+# Lokale Backup-Bereinigung
+cleanup_old_backups() {
+    local backup_dir="$1"
+    local retention_days="$2"
+    local dry_run="$3"
+    local verbose="$4"
+    
+    step "Bereinige alte lokale Backups"
+    
+    local meta_file="$backup_dir/autobackup_meta.json"
+    
+    if [[ ! -f "$meta_file" ]]; then
+        log_warn "autobackup_meta.json nicht gefunden - überspringe Bereinigung"
+        log_info "Pfad: $meta_file"
+        return 0
+    fi
+    
+    log_info "Verwende Metadata aus: $meta_file"
+    
+    # Aktuelle Backup-Dateien aus Meta-JSON extrahieren
+    local temp_exclude_file
+    temp_exclude_file=$(mktemp /tmp/udm_backup_excludes.XXXXXX)
+    
+    if ! jq -r '.[] | select(.unf != null) | .unf' "$meta_file" > "$temp_exclude_file" 2>/dev/null; then
+        log_error "Fehler beim Parsen der autobackup_meta.json"
+        rm -f "$temp_exclude_file"
+        return 1
+    fi
+    
+    # Meta-Datei selbst auch ausschließen
+    echo "autobackup_meta.json" >> "$temp_exclude_file"
+    
+    local exclude_count
+    exclude_count=$(wc -l < "$temp_exclude_file")
+    log_info "Aktuelle Backup-Dateien (werden behalten): $exclude_count"
+    
+    if [[ "$verbose" == "true" ]]; then
+        log_info "Zu behaltende Dateien:"
+        while IFS= read -r file; do
+            log_info "  - $file"
+        done < "$temp_exclude_file"
+    fi
+    
+    # Alte Dateien finden und löschen
+    local deleted_count=0
+    local total_size=0
+    
+    cd "$backup_dir" || {
+        log_error "Konnte nicht in Backup-Verzeichnis wechseln: $backup_dir"
+        rm -f "$temp_exclude_file"
+        return 1
+    }
+    
+    for file in *; do
+        # Versteckte Dateien und Verzeichnisse überspringen
+        [[ "$file" == .* ]] && continue
+        [[ -d "$file" ]] && continue
+        [[ ! -f "$file" ]] && continue
+        
+        # Prüfen ob Datei in Exclude-Liste
+        if ! grep -qxFe "$file" "$temp_exclude_file"; then
+            local file_age_days
+            if command -v stat &> /dev/null; then
+                # macOS/BSD stat
+                if stat -f "%Sm" -t "%s" "$file" &>/dev/null; then
+                    local file_timestamp
+                    file_timestamp=$(stat -f "%Sm" -t "%s" "$file" 2>/dev/null)
+                    file_age_days=$(( ($(date +%s) - file_timestamp) / 86400 ))
+                # GNU stat
+                elif stat -c "%Y" "$file" &>/dev/null; then
+                    local file_timestamp
+                    file_timestamp=$(stat -c "%Y" "$file" 2>/dev/null)
+                    file_age_days=$(( ($(date +%s) - file_timestamp) / 86400 ))
+                else
+                    file_age_days=0
+                fi
+            else
+                file_age_days=0
+            fi
+            
+            # Löschen wenn älter als Retention-Period oder nicht in Meta-JSON
+            if [[ "$file_age_days" -gt "$retention_days" ]] || [[ "$retention_days" -eq 0 ]]; then
+                local file_size=0
+                if [[ -f "$file" ]]; then
+                    file_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo 0)
+                    total_size=$((total_size + file_size))
+                fi
+                
+                if [[ "$dry_run" == "true" ]]; then
+                    log_info "[DRY-RUN] Würde löschen: $file ($(format_size $file_size))"
+                else
+                    log_info "Lösche: $file ($(format_size $file_size))"
+                    rm "$file"
+                fi
+                ((deleted_count++))
+            else
+                if [[ "$verbose" == "true" ]]; then
+                    log_info "Behalte: $file (${file_age_days}d alt)"
+                fi
+            fi
+        fi
+    done
+    
+    rm -f "$temp_exclude_file"
+    
+    # Zusammenfassung
+    if [[ "$deleted_count" -gt 0 ]]; then
+        local total_size_human
+        total_size_human=$(format_size $total_size)
+        
+        if [[ "$dry_run" == "true" ]]; then
+            log_info "[DRY-RUN] Würde $deleted_count Dateien löschen ($total_size_human)"
+        else
+            log_success "Gelöschte Dateien: $deleted_count ($total_size_human)"
+        fi
+    else
+        log_info "Keine alten Dateien zum Löschen gefunden"
+    fi
+    
+    return 0
+}
+
+# Backup-Statistiken anzeigen
+show_backup_stats() {
+    local backup_dir="$1"
+    local verbose="$2"
+    
+    if [[ ! -d "$backup_dir" ]]; then
+        return 0
+    fi
+    
+    local meta_file="$backup_dir/autobackup_meta.json"
+    local backup_count=0
+    local total_size=0
+    local newest_backup=""
+    local oldest_backup=""
+    
+    # .unf Dateien zählen und Größe berechnen
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" ]]; then
+            ((backup_count++))
+            local file_size
+            file_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo 0)
+            total_size=$((total_size + file_size))
+            
+            # Neueste und älteste Datei finden
+            if [[ -z "$newest_backup" ]] || [[ "$file" -nt "$newest_backup" ]]; then
+                newest_backup="$file"
+            fi
+            if [[ -z "$oldest_backup" ]] || [[ "$file" -ot "$oldest_backup" ]]; then
+                oldest_backup="$file"
+            fi
+        fi
+    done < <(find "$backup_dir" -name "*.unf" -print0 2>/dev/null)
+    
+    echo
+    log_info "=== Backup-Statistiken ==="
+    log_info "Verzeichnis: $backup_dir"
+    log_info "Anzahl Backups: $backup_count"
+    
+    if [[ "$total_size" -gt 0 ]]; then
+        local total_size_human
+        total_size_human=$(format_size $total_size)
+        log_info "Gesamtgröße: $total_size_human"
+    fi
+    
+    if [[ -n "$newest_backup" ]]; then
+        local newest_file
+        newest_file=$(basename "$newest_backup")
+        log_info "Neuestes Backup: $newest_file"
+    fi
+    
+    if [[ "$verbose" == "true" ]] && [[ -f "$meta_file" ]]; then
+        log_info "Meta-Datei: vorhanden"
+        local meta_entries
+        if meta_entries=$(jq '. | length' "$meta_file" 2>/dev/null); then
+            log_info "Meta-Einträge: $meta_entries"
+        fi
+    fi
+    
+    echo
+}
+
+# Hauptfunktion
+main() {
+    # Variablen initialisieren
+    local udm_host="${UDM_HOST:-$DEFAULT_UDM_HOST}"
+    local udm_user="${UDM_USER:-$DEFAULT_UDM_USER}"
+    local udm_port="${UDM_PORT:-$DEFAULT_UDM_PORT}"
+    local backup_dir="${UDM_BACKUP_DIR:-$DEFAULT_BACKUP_DIR}"
+    local ssh_key="${UDM_SSH_KEY:-$DEFAULT_SSH_KEY}"
+    local retention_days="${UDM_RETENTION_DAYS:-$DEFAULT_RETENTION_DAYS}"
+    local dry_run="false"
+    local verbose="false"
+    local skip_cleanup="false"
+    local skip_download="false"
+    
+    # Konfigurationsdatei laden
+    load_config_file
+    
+    # Argumentverarbeitung
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -H|--host)
+                udm_host="$2"
+                shift 2
+                ;;
+            -u|--user)
+                udm_user="$2"
+                shift 2
+                ;;
+            -p|--port)
+                udm_port="$2"
+                shift 2
+                ;;
+            -d|--directory)
+                backup_dir="$2"
+                shift 2
+                ;;
+            -k|--ssh-key)
+                ssh_key="$2"
+                shift 2
+                ;;
+            -r|--retention)
+                retention_days="$2"
+                shift 2
+                ;;
+            -n|--dry-run)
+                dry_run="true"
+                shift
+                ;;
+            -v|--verbose)
+                verbose="true"
+                shift
+                ;;
+            --skip-cleanup)
+                skip_cleanup="true"
+                shift
+                ;;
+            --skip-download)
+                skip_download="true"
+                shift
+                ;;
+            -*)
+                log_error "Unbekannte Option: $1"
+                echo "Verwendung: $0 [options]"
+                echo "Für Hilfe: $0 --help"
+                exit 1
+                ;;
+            *)
+                log_error "Unerwartetes Argument: $1"
+                echo "Verwendung: $0 [options]"
+                exit 1
+                ;;
+        esac
+    done
+    
+    # Parameter validieren
+    if [[ ! "$udm_port" =~ ^[0-9]+$ ]] || [[ "$udm_port" -lt 1 ]] || [[ "$udm_port" -gt 65535 ]]; then
+        log_error "Ungültiger Port: $udm_port"
+        exit 1
+    fi
+    
+    if [[ ! "$retention_days" =~ ^[0-9]+$ ]]; then
+        log_error "Ungültige Retention-Tage: $retention_days"
+        exit 1
+    fi
+    
+    # Dry-run Info
+    if [[ "$dry_run" == "true" ]]; then
+        log_warn "DRY-RUN Modus - keine Änderungen werden vorgenommen"
+    fi
+    
+    log_info "UniFi Dream Machine Backup gestartet"
+    log_info "UDM: $udm_user@$udm_host:$udm_port"
+    log_info "Backup-Verzeichnis: $backup_dir"
+    log_info "Retention: $retention_days Tage"
+    
+    # Abhängigkeiten prüfen
+    check_dependencies
+    
+    # Backup-Verzeichnis vorbereiten
+    if ! prepare_backup_directory "$backup_dir" "$verbose"; then
+        exit 1
+    fi
+    
+    # Download-Phase
+    if [[ "$skip_download" == "false" ]]; then
+        # SSH-Verbindung testen
+        if ! test_ssh_connection "$udm_host" "$udm_user" "$udm_port" "$ssh_key" "$verbose"; then
+            exit 1
+        fi
+        
+        # UDM Backup-Verzeichnis prüfen
+        if ! check_udm_backup_dir "$udm_host" "$udm_user" "$udm_port" "$ssh_key" "$verbose"; then
+            exit 1
+        fi
+        
+        # Backups herunterladen
+        if ! download_backups "$udm_host" "$udm_user" "$udm_port" "$ssh_key" "$backup_dir" "$dry_run" "$verbose"; then
+            exit 1
+        fi
+    else
+        log_info "Download übersprungen (--skip-download)"
+    fi
+    
+    # Cleanup-Phase
+    if [[ "$skip_cleanup" == "false" ]]; then
+        if ! cleanup_old_backups "$backup_dir" "$retention_days" "$dry_run" "$verbose"; then
+            log_warn "Backup-Bereinigung fehlgeschlagen"
+        fi
+    else
+        log_info "Bereinigung übersprungen (--skip-cleanup)"
+    fi
+    
+    # Statistiken anzeigen
+    show_backup_stats "$backup_dir" "$verbose"
+    
+    if [[ "$dry_run" == "true" ]]; then
+        log_success "DRY-RUN abgeschlossen - keine Änderungen vorgenommen"
+    else
+        log_success "UDM Backup erfolgreich abgeschlossen"
+    fi
+}
+
+# Script ausführen
+main "$@"

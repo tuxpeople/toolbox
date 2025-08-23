@@ -25,13 +25,13 @@ Dieses Script erfasst automatisch alle diese Endpunkte durch Analyse des `crane 
 1. Script herunterladen:
 
    ```bash
-   curl -o crane_fqdn.sh https://raw.githubusercontent.com/tuxpeople/toolbox/main/crane_fqdn/crane_fqdn.sh
-   chmod +x crane_fqdn.sh
+   curl -o crane_fqdn https://raw.githubusercontent.com/tuxpeople/toolbox/main/crane_fqdn/crane_fqdn
+   chmod +x crane_fqdn
    ```
 
 2. Oder manuell erstellen und ausführbar machen:
    ```bash
-   chmod +x crane_fqdn.sh
+   chmod +x crane_fqdn
    ```
 
 ## 💻 Verwendung
@@ -39,7 +39,7 @@ Dieses Script erfasst automatisch alle diese Endpunkte durch Analyse des `crane 
 ### Grundlegende Syntax
 
 ```bash
-./crane_fqdn.sh <image>
+./crane_fqdn <image>
 ```
 
 ### Beispiele
@@ -47,28 +47,28 @@ Dieses Script erfasst automatisch alle diese Endpunkte durch Analyse des `crane 
 **Docker Hub Images:**
 
 ```bash
-./crane_fqdn.sh nginx:latest
-./crane_fqdn.sh postgres:15
+./crane_fqdn nginx:latest
+./crane_fqdn postgres:15
 ```
 
 **Private Registries:**
 
 ```bash
-./crane_fqdn.sh gcr.io/my-project/my-app:v1.0.0
-./crane_fqdn.sh quay.io/prometheus/node-exporter:latest
+./crane_fqdn gcr.io/my-project/my-app:v1.0.0
+./crane_fqdn quay.io/prometheus/node-exporter:latest
 ```
 
 **Enterprise Registries:**
 
 ```bash
-./crane_fqdn.sh my-company.azurecr.io/app:latest
-./crane_fqdn.sh 123456789.dkr.ecr.eu-west-1.amazonaws.com/my-app:v2.1.0
+./crane_fqdn my-company.azurecr.io/app:latest
+./crane_fqdn 123456789.dkr.ecr.eu-west-1.amazonaws.com/my-app:v2.1.0
 ```
 
 ## 📄 Ausgabe-Beispiel
 
 ```bash
-$ ./crane_fqdn.sh registry.rancher.com/rancher/rancher:v2.10.3
+$ ./crane_fqdn registry.rancher.com/rancher/rancher:v2.10.3
 
 [INFO] Extrahiere FQDNs für Image: registry.rancher.com/rancher/rancher:v2.10.3
 [INFO] Verwende Ihre elegante One-Liner Methode...
@@ -116,7 +116,7 @@ crane -v pull "$IMAGE" "$TEMP_FILE" 2>&1 | \
 
 ```bash
 # FQDNs für nginx:latest ermitteln
-./crane_fqdn.sh nginx:latest
+./crane_fqdn nginx:latest
 
 # Output für Firewall-Team:
 # docker.io,registry-1.docker.io,auth.docker.io,production.cloudflare.docker.com
@@ -128,7 +128,7 @@ crane -v pull "$IMAGE" "$TEMP_FILE" 2>&1 | \
 # Alle benötigten Endpunkte für ein Deployment ermitteln
 for image in nginx:latest postgres:15 redis:7; do
     echo "=== $image ==="
-    ./crane_fqdn.sh "$image"
+    ./crane_fqdn "$image"
     echo
 done
 ```
@@ -137,13 +137,13 @@ done
 
 ```bash
 # Vergleich der Endpunkte zwischen alter und neuer Registry
-./crane_fqdn.sh old-registry.com/app:v1.0
-./crane_fqdn.sh new-registry.com/app:v1.0
+./crane_fqdn old-registry.com/app:v1.0
+./crane_fqdn new-registry.com/app:v1.0
 ```
 
 ## 🌐 Unterstützte Registries
 
-Das Script funktioniert mit allen Container-Registries, einschließlich:
+Das Script funktioniert mit allen Container-Registries, einschliesslich:
 
 - **Docker Hub** (`docker.io`)
 - **Google Container Registry** (`gcr.io`, `pkg.dev`)
@@ -194,7 +194,7 @@ crane manifest nginx:latest
 
 ```bash
 # Script ausführbar machen
-chmod +x crane_fqdn.sh
+chmod +x crane_fqdn
 ```
 
 ### Debug-Modus
