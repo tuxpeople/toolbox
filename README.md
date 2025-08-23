@@ -11,6 +11,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 - **[brewfile-commenter](./brewfile-commenter/)** - Fügt automatisch Beschreibungen zu Brewfile-Einträgen hinzu
 - **[lima-k8s](./lima-k8s/)** - Lima-basierte Kubernetes und k3s Cluster für lokale Entwicklung
 - **[serve_this](./serve_this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
+- **[yt-get](./yt-get/)** - Einfacher Wrapper für yt-dlp zum Download von Videos und Audio
 
 ### Network & SSH
 - **[fix-ssh-key](./fix-ssh-key/)** - SSH Known Hosts reparieren und aktualisieren
@@ -54,6 +55,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd lima-k8s
    ./lima-k8s start k8s
    
+   # Video/Audio Download
+   cd yt-get
+   ./yt-get video "https://youtube.com/watch?v=..."
+   
    # Lokalen HTTPS-Server starten
    cd serve_this
    ./serve_this
@@ -75,6 +80,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 🌐 serve_this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
 | 🛠️ fix-perms | ✅ **Ready** | macOS Permissions Reparatur-Tool |
 | 📡 udm_backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
+| 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
 
 **Legende:**
 - ✅ **Ready** - Vollständig überarbeitet, dokumentiert und einsatzbereit
@@ -149,6 +155,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | lima-k8s | `lima` | `brew install lima` |
 | serve_this | `python3`, `openssl` | Meist vorinstalliert |
 | udm_backup | `ssh`, `scp`, `jq` | `brew install jq` |
+| yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
 
 ## 🤝 Beitragen
 
