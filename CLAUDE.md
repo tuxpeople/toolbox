@@ -19,6 +19,7 @@ toolbox/
 
 ### Script-Organisation (ZWINGEND)
 - **Eigener Ordner:** Jedes Script hat seinen eigenen Ordner
+- **Bindestrich-Namen:** Tool-Namen verwenden Bindestriche (-), KEINE Unterstriche (_)
 - **Keine Dateiendung:** Scripts haben KEINE Dateiendung (nicht .sh)
 - **Executable:** Alle Scripts müssen ausführbar sein (`chmod +x`)
 - **README.md:** Jedes Script hat ein README im gleichen Aufbau
@@ -155,10 +156,10 @@ find . -name "*.sh" -exec shellcheck {} \;
 5. **Haupt-README.md** bei strukturellen Änderungen anpassen
 
 ### Bei neuen Tools (ZWINGEND - ALLE Schritte erforderlich!)
-1. **Eigenen Ordner** erstellen: `tool_name/`
-2. **Ausführbares Script:** `tool_name` (OHNE .sh Endung!)
-3. **Script executable machen:** `chmod +x tool_name/tool_name`
-4. **ZWINGEND: README.md erstellen** nach obiger Struktur im tool_name/ Ordner
+1. **Eigenen Ordner** erstellen: `tool-name/` (mit Bindestrichen!)
+2. **Ausführbares Script:** `tool-name` (OHNE .sh Endung!)
+3. **Script executable machen:** `chmod +x tool-name/tool-name`
+4. **ZWINGEND: README.md erstellen** nach obiger Struktur im tool-name/ Ordner
 5. **ZWINGEND: Haupt-README.md erweitern:**
    - Tool in "Verfügbare Tools" Sektion hinzufügen
    - Beispiel in "Schnellstart" Sektion hinzufügen
@@ -176,6 +177,7 @@ find . -name "*.sh" -exec shellcheck {} \;
 - **Kern-Funktionalität** bestehender Tools ohne Genehmigung
 
 ### Immer prüfen
+- **Bindestrich-Namen** für Tools (nicht Unterstriche!)
 - **Keine Dateiendungen** bei Scripts (nicht .sh!)
 - **Executable-Rechte** gesetzt (`chmod +x`)
 - **Portable Shebang-Zeilen** (`#!/usr/bin/env bash`)
@@ -195,7 +197,8 @@ find . -name "*.sh" -exec shellcheck {} \;
 ## 🎯 Qualitätskriterien
 
 Ein Tool gilt als "✅ Ready" wenn:
-- ✅ **Eigener Ordner** erstellt
+- ✅ **Eigener Ordner** erstellt (mit Bindestrichen!)
+- ✅ **Bindestrich-Namen** verwendet (keine Unterstriche!)
 - ✅ **Keine Dateiendung** (.sh entfernt)
 - ✅ **Executable-Rechte** gesetzt
 - ✅ **macOS/Linux kompatibel** (getestet)
