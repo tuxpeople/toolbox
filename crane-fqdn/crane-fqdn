@@ -11,26 +11,54 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-if [[ $# -eq 0 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
-    cat << EOF
+# Parse command line arguments
+COMMA_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c|--comma)
+            COMMA_ONLY=true
+            shift
+            ;;
+        -h|--help)
+            cat << EOF
 Crane FQDN Extractor
 
 VERWENDUNG:
-    $0 <image>
+    $0 [OPTIONS] <image>
+
+OPTIONEN:
+    -c, --comma     Nur komma-getrennte Liste ausgeben (für Automatisierung)
+    -h, --help      Diese Hilfe anzeigen
 
 BEISPIELE:
     $0 nginx:latest
-    $0 registry.rancher.com/rancher/rancher:v2.10.3
-    $0 gcr.io/project/image:tag
+    $0 --comma registry.rancher.com/rancher/rancher:v2.10.3
+    $0 -c gcr.io/project/image:tag
 
 Das Script extrahiert FQDNs durch Analyse der crane-Verbose-Ausgabe:
 crane -v pull <image> /tmp/image.tgz 2>&1 | grep "\\-\\->\\|<\\-\\-" | grep -o -E 'https?://[^,]+' | tr ',' '\\n' | cut -d'/' -f1-3 | sed 's|https\\?://||' | sort -u
 
 EOF
-    exit 0
-fi
+            exit 0
+            ;;
+        -*)
+            echo -e "${RED}[ERROR]${NC} Unbekannte Option: $1" >&2
+            echo "Verwende --help für Hilfe." >&2
+            exit 1
+            ;;
+        *)
+            IMAGE="$1"
+            shift
+            ;;
+    esac
+done
 
-IMAGE="$1"
+if [[ -z "${IMAGE:-}" ]]; then
+    echo -e "${RED}[ERROR]${NC} Kein Image angegeben!" >&2
+    echo "Verwende --help für Hilfe." >&2
+    exit 1
+fi
 
 # Prüfen ob crane installiert ist
 if ! command -v crane &> /dev/null; then
@@ -39,12 +67,16 @@ if ! command -v crane &> /dev/null; then
     exit 1
 fi
 
-echo -e "${BLUE}[INFO]${NC} Extrahiere FQDNs für Image: $IMAGE"
+if [[ "$COMMA_ONLY" == "false" ]]; then
+    echo -e "${BLUE}[INFO]${NC} Extrahiere FQDNs für Image: $IMAGE"
+fi
 
 # Temporäre Datei für das Image (mit PID für Eindeutigkeit)
 TEMP_FILE=$(mktemp /tmp/crane_image_$$_XXXXXX.tgz)
 
-echo -e "${BLUE}[INFO]${NC} Führe crane -v pull aus..."
+if [[ "$COMMA_ONLY" == "false" ]]; then
+    echo -e "${BLUE}[INFO]${NC} Führe crane -v pull aus..."
+fi
 
 # FQDN-Extraktion mit dem funktionierenden Oneliner-Pattern
 FQDNS=$(crane -v pull "$IMAGE" "$TEMP_FILE" 2>&1 | \
@@ -60,20 +92,28 @@ rm -f "$TEMP_FILE"
 
 # Ergebnisse anzeigen
 if [[ -n "$FQDNS" ]]; then
-    echo
-    echo -e "${GREEN}[SUCCESS]${NC} Gefundene FQDNs:"
-    echo "=========================="
-    echo "$FQDNS"
-    echo "=========================="
-    
-    FQDN_COUNT=$(echo "$FQDNS" | wc -l)
-    echo -e "${BLUE}[INFO]${NC} Insgesamt $FQDN_COUNT unique FQDNs gefunden"
-    
-    echo
-    echo -e "${BLUE}[INFO]${NC} Für Firewall-Regel (komma-getrennt):"
-    echo "$FQDNS" | tr '\n' ',' | sed 's/,$//'
-    echo
+    if [[ "$COMMA_ONLY" == "true" ]]; then
+        # Nur komma-getrennte Liste ausgeben
+        echo "$FQDNS" | tr '\n' ',' | sed 's/,$//'
+    else
+        # Vollständige Ausgabe
+        echo
+        echo -e "${GREEN}[SUCCESS]${NC} Gefundene FQDNs:"
+        echo "=========================="
+        echo "$FQDNS"
+        echo "=========================="
+        
+        FQDN_COUNT=$(echo "$FQDNS" | wc -l)
+        echo -e "${BLUE}[INFO]${NC} Insgesamt $FQDN_COUNT unique FQDNs gefunden"
+        
+        echo
+        echo -e "${BLUE}[INFO]${NC} Für Firewall-Regel (komma-getrennt):"
+        echo "$FQDNS" | tr '\n' ',' | sed 's/,$//'
+        echo
+    fi
 else
-    echo -e "${RED}[ERROR]${NC} Keine FQDNs gefunden!"
+    if [[ "$COMMA_ONLY" == "false" ]]; then
+        echo -e "${RED}[ERROR]${NC} Keine FQDNs gefunden!"
+    fi
     exit 1
 fi
