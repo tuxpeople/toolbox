@@ -5,10 +5,12 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 ## 📋 Verfügbare Tools
 
 ### Container & Registry
+- **[check-images](./check-images/)** - Prüft Verfügbarkeit von Container-Images in verschiedenen Registries
 - **[crane_fqdn](./crane_fqdn/)** - Extrahiert FQDNs für Container-Registry Firewall-Freischaltungen
 
 ### Development & Build
 - **[brewfile-commenter](./brewfile-commenter/)** - Fügt automatisch Beschreibungen zu Brewfile-Einträgen hinzu
+- **[gitlab-clone](./gitlab-clone/)** - Synchronisiert alle GitLab-Repositories eines Benutzers
 - **[lima-k8s](./lima-k8s/)** - Lima-basierte Kubernetes und k3s Cluster für lokale Entwicklung
 - **[serve_this](./serve_this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
 - **[yt-get](./yt-get/)** - Einfacher Wrapper für yt-dlp zum Download von Videos und Audio
@@ -18,6 +20,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 ### Security & Kubernetes
 - **[k8s_vuln](./k8s_vuln/)** - Scannt Kubernetes-Cluster auf Sicherheitslücken
+- **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
 
 ### System Administration
 - **[fix-perms](./fix-perms/)** - macOS Benutzer-Permissions reparieren
@@ -35,6 +38,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 2. Gewünschtes Tool verwenden:
    ```bash
+   # Container-Images Verfügbarkeit prüfen
+   cd check-images
+   ./check-images --image nginx:latest
+   
    # Container-Registry FQDNs extrahieren
    cd crane_fqdn
    ./crane_fqdn.sh nginx:latest
@@ -43,6 +50,11 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd brewfile-commenter
    ./brewfile-commenter.sh
    
+   # GitLab Repositories synchronisieren
+   cd gitlab-clone
+   export GITLAB_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
+   ./gitlab-clone
+   
    # SSH Host-Keys reparieren
    cd fix-ssh-key
    ./fix-ssh-key example.com
@@ -50,6 +62,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    # Kubernetes Vulnerability Scan
    cd k8s_vuln
    ./k8s_vuln.sh CVE-2021-44228
+   
+   # Namespace-Logs exportieren
+   cd namespace-logs
+   ./namespace-logs -n production -s "2025-08-25T13:00:00Z" -e "2025-08-25T14:00:00Z" -o ./logs
    
    # Lima Kubernetes Cluster starten
    cd lima-k8s
@@ -72,10 +88,13 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 | Tool | Status | Beschreibung |
 |------|--------|--------------|
+| 🔍 check-images | ✅ **Ready** | Container Image Availability Checker |
 | 🏗️ crane_fqdn | ✅ **Ready** | Container-Registry FQDN Extraktor |
 | 🍺 brewfile-commenter | ✅ **Ready** | Brewfile Beschreibungs-Generator |
+| 🦊 gitlab-clone | ✅ **Ready** | GitLab Repository Synchronisation Tool |
 | 🔑 fix-ssh-key | ✅ **Ready** | SSH Known Hosts Reparatur |
 | 🛡️ k8s_vuln | ✅ **Ready** | Kubernetes Vulnerability Scanner |
+| 📜 namespace-logs | ✅ **Ready** | Kubernetes Namespace Log Exporter |
 | 🚀 lima-k8s | ✅ **Ready** | Lima-basierte Kubernetes/k3s Cluster Manager |
 | 🌐 serve_this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
 | 🛠️ fix-perms | ✅ **Ready** | macOS Permissions Reparatur-Tool |
@@ -97,6 +116,9 @@ Jedes Tool hat seinen eigenen Ordner mit:
 
 ### DevOps & CI/CD
 ```bash
+# Container-Image Verfügbarkeit vor Deployment prüfen
+./check-images/check-images --file deployment-images.txt
+
 # Container-Security in Pipeline
 ./k8s_vuln/k8s_vuln.sh CVE-2021-44228 --quiet
 
@@ -111,6 +133,9 @@ Jedes Tool hat seinen eigenen Ordner mit:
 
 # Brewfile dokumentieren
 ./brewfile-commenter/brewfile-commenter.sh
+
+# Alle GitLab-Repositories synchronisieren
+./gitlab-clone/gitlab-clone --verbose
 ```
 
 ### System Administration
@@ -120,6 +145,9 @@ Jedes Tool hat seinen eigenen Ordner mit:
 
 # Kubernetes-Security-Audit
 ./k8s_vuln/k8s_vuln.sh CVE-2022-0492 -s CRITICAL
+
+# Kubernetes-Namespace-Logs exportieren
+./namespace-logs/namespace-logs -n production -s "2025-08-25T10:00:00Z" -e "2025-08-25T12:00:00Z" -o ./incident-logs
 
 # UniFi Dream Machine Backups
 ./udm_backup/udm_backup --dry-run
@@ -148,10 +176,13 @@ find . -type f -perm +111 -exec chmod +x {} \;
 
 | Tool | Abhängigkeiten | Installation |
 |------|----------------|--------------|
+| check-images | `curl` | Meist vorinstalliert |
 | crane_fqdn | `crane` | `go install github.com/google/go-containerregistry/cmd/crane@latest` |
 | brewfile-commenter | `brew`, `jq` | `brew install jq` |
+| gitlab-clone | `curl`, `jq`, `git` | `brew install curl jq git` |
 | fix-ssh-key | `ssh-keygen`, `ssh-keyscan` | Meist vorinstalliert |
 | k8s_vuln | `trivy`, `kubectl` | `brew install trivy kubectl` |
+| namespace-logs | `kubectl` | `brew install kubectl` |
 | lima-k8s | `lima` | `brew install lima` |
 | serve_this | `python3`, `openssl` | Meist vorinstalliert |
 | udm_backup | `ssh`, `scp`, `jq` | `brew install jq` |
@@ -189,9 +220,12 @@ tool_name/
 ## 🔒 Sicherheitshinweise
 
 - **brewfile-commenter**: 📝 Modifiziert Brewfile - erstellt automatisch Backups
+- **check-images**: 🔍 Führt HTTP-Requests zu Container-Registries durch - respektiert Rate-Limits
+- **gitlab-clone**: 🦊 Benötigt GitLab API Token - sichere Aufbewahrung erforderlich
 - **fix-perms**: 🛠️ Repariert macOS Benutzerverzeichnis-Berechtigungen - nur auf eigenen Systemen verwenden
 - **fix-ssh-key**: 🔑 Modifiziert SSH known_hosts - entfernt und fügt Host-Keys hinzu
 - **k8s_vuln**: 🛡️ Benötigt Cluster-Zugriff - Berechtigungen prüfen
+- **namespace-logs**: 📜 Benötigt Kubernetes-Cluster-Zugriff und Pod-Log-Berechtigungen
 - **serve_this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten
 - **udm_backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
 

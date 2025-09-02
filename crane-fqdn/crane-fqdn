@@ -41,15 +41,15 @@ fi
 
 echo -e "${BLUE}[INFO]${NC} Extrahiere FQDNs für Image: $IMAGE"
 
-# Temporäre Datei für das Image
-TEMP_FILE=$(mktemp /tmp/crane_image_XXXXXX.tgz)
+# Temporäre Datei für das Image (mit PID für Eindeutigkeit)
+TEMP_FILE=$(mktemp /tmp/crane_image_$$_XXXXXX.tgz)
 
 echo -e "${BLUE}[INFO]${NC} Führe crane -v pull aus..."
 
-# FQDN-Extraktion mit verbesserter URL-Behandlung
+# FQDN-Extraktion mit dem funktionierenden Oneliner-Pattern
 FQDNS=$(crane -v pull "$IMAGE" "$TEMP_FILE" 2>&1 | \
     grep "\-\->\|<\-\-" | \
-    grep -o -E 'https?://[^,\s]+' | \
+    grep -o -E 'https?://[^,]+' | \
     tr ',' '\n' | \
     cut -d'/' -f1-3 | \
     sed -E 's|^https?://||' | \

@@ -1,0 +1,488 @@
+#!/usr/bin/env bash
+
+# gitlab-clone - GitLab Repository Synchronisation Tool
+# Klont oder aktualisiert alle zugänglichen GitLab-Repositories eines Benutzers
+
+set -euo pipefail
+
+# Globale Variablen
+GITLAB_API="${GITLAB_API:-}"
+GITLAB_TOKEN="${GITLAB_TOKEN:-}"
+BASE_DIR="${BASE_DIR:-}"
+REPO_FILTER="${REPO_FILTER:-}"
+DRY_RUN=false
+VERBOSE=false
+FORCE=false
+PER_PAGE=100
+
+# Farb-Definitionen für Logs
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Statistiken
+STATS_CLONED=0
+STATS_PULLED=0
+STATS_SKIPPED=0
+STATS_ERRORS=0
+
+# Log-Funktionen
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[VERBOSE]${NC} $1" >&2
+    fi
+}
+
+# Hilfe-Funktion
+show_help() {
+    cat << EOF
+gitlab-clone - GitLab Repository Synchronisation Tool
+
+VERWENDUNG:
+    gitlab-clone [OPTIONEN]
+
+OPTIONEN:
+    -t, --token TOKEN        GitLab API Token (oder GITLAB_TOKEN env)
+    -u, --url URL            GitLab API URL (oder GITLAB_API env)
+                             Standard: https://gitlab.com/api/v4
+    -d, --dir DIR            Ziel-Verzeichnis für Repositories
+                             Standard: ./repos
+    -f, --filter FILTER      Filter für Repository-Namen
+    -v, --verbose            Detaillierte Ausgabe
+    -n, --dry-run            Nur anzeigen was gemacht würde
+    --force                  Überschreibe ohne Nachfrage
+    -h, --help               Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    GITLAB_TOKEN             GitLab API Token (erforderlich)
+    GITLAB_API               GitLab API URL (optional)
+    BASE_DIR                 Basis-Verzeichnis für Repositories
+    REPO_FILTER              Filter für Repository-Namen
+
+BEISPIELE:
+    # Alle Repositories klonen/aktualisieren
+    export GITLAB_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
+    gitlab-clone
+
+    # Mit Custom GitLab-Instanz
+    gitlab-clone --url "https://gitlab.example.com/api/v4" --token "glpat-xxx"
+
+    # Nur bestimmte Repositories (Filter)
+    gitlab-clone --filter "backend"
+
+    # In spezifisches Verzeichnis
+    gitlab-clone --dir "/backup/repos"
+
+    # Dry-Run um zu sehen was passieren würde
+    gitlab-clone --dry-run --verbose
+
+    # Mit .env-Datei im Script-Verzeichnis
+    echo 'GITLAB_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"' > .env
+    echo 'GITLAB_API="https://gitlab.example.com/api/v4"' >> .env
+    gitlab-clone
+
+HINWEISE:
+    - GitLab API Token mit 'read_repository' Berechtigung erforderlich
+    - Script erstellt .env-Datei im Script-Verzeichnis für Konfiguration
+    - Repositories werden nach GitLab-Namespace-Struktur organisiert
+    - Lokale Änderungen werden respektiert (kein Force-Pull)
+    - Bei SSH-URLs werden SSH-Keys verwendet, bei HTTPS der Token
+EOF
+}
+
+# Abhängigkeiten prüfen
+check_dependencies() {
+    local missing_deps=()
+    
+    if ! command -v curl &> /dev/null; then
+        missing_deps+=("curl")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+    fi
+    
+    if ! command -v git &> /dev/null; then
+        missing_deps+=("git")
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_error "Installation:"
+        log_error "  macOS: brew install ${missing_deps[*]}"
+        log_error "  Linux: apt install ${missing_deps[*]} oder yum install ${missing_deps[*]}"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Parameter parsen
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -t|--token)
+                GITLAB_TOKEN="$2"
+                shift 2
+                ;;
+            -u|--url)
+                GITLAB_API="$2"
+                shift 2
+                ;;
+            -d|--dir)
+                BASE_DIR="$2"
+                shift 2
+                ;;
+            -f|--filter)
+                REPO_FILTER="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            --force)
+                FORCE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unbekannte Option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# .env-Datei laden
+load_env_file() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local env_file="$script_dir/.env"
+    
+    if [[ -f "$env_file" ]]; then
+        log_verbose "Lade Konfiguration aus $env_file"
+        # shellcheck source=/dev/null
+        source "$env_file"
+    fi
+}
+
+# Parameter validieren
+validate_parameters() {
+    # Defaults setzen
+    if [[ -z "$GITLAB_API" ]]; then
+        GITLAB_API="https://gitlab.com/api/v4"
+    fi
+    
+    if [[ -z "$BASE_DIR" ]]; then
+        BASE_DIR="./repos"
+    fi
+    
+    # Token prüfen
+    if [[ -z "$GITLAB_TOKEN" ]]; then
+        log_error "GitLab Token erforderlich"
+        log_error "Setze GITLAB_TOKEN Umgebungsvariable oder verwende --token"
+        return 1
+    fi
+    
+    # API-Verbindung testen
+    if ! test_gitlab_connection; then
+        return 1
+    fi
+    
+    return 0
+}
+
+# GitLab API-Verbindung testen
+test_gitlab_connection() {
+    log_verbose "Teste Verbindung zu GitLab API: $GITLAB_API"
+    
+    local response
+    if ! response=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$GITLAB_API/projects?membership=true&simple=true&per_page=1" 2>&1); then
+        log_error "Verbindung zu GitLab fehlgeschlagen: $response"
+        return 1
+    fi
+    
+    if echo "$response" | grep -q "GitLab is not responding"; then
+        log_error "GitLab API antwortet mit Fehler"
+        return 1
+    fi
+    
+    if echo "$response" | grep -q "401 Unauthorized"; then
+        log_error "GitLab Token ungültig oder abgelaufen"
+        return 1
+    fi
+    
+    log_verbose "GitLab API-Verbindung erfolgreich"
+    return 0
+}
+
+# Bestätigung für existierendes Basis-Verzeichnis
+confirm_overwrite() {
+    if [[ "$FORCE" == "true" ]]; then
+        return 0
+    fi
+    
+    if [[ -d "$BASE_DIR" ]] && [[ -n "$(ls -A "$BASE_DIR" 2>/dev/null)" ]]; then
+        log_warn "Ziel-Verzeichnis '$BASE_DIR' ist nicht leer"
+        read -p "Trotzdem fortfahren? [y/N]: " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Abgebrochen"
+            exit 0
+        fi
+    fi
+}
+
+# Repository behandeln (klonen oder pullen)
+handle_repository() {
+    local repo_url="$1"
+    local namespace_path="$2"
+    local repo_name="$3"
+    local full_path="$namespace_path/$repo_name"
+    
+    # Filter anwenden
+    if [[ -n "$REPO_FILTER" ]] && [[ "$full_path" != *${REPO_FILTER}* ]]; then
+        log_verbose "Repository $full_path entspricht nicht Filter '$REPO_FILTER' - übersprungen"
+        ((STATS_SKIPPED++))
+        return 0
+    fi
+    
+    log_info "Bearbeite Repository: $full_path"
+    
+    # Ziel-Verzeichnis
+    local target_dir="$BASE_DIR/$namespace_path/$repo_name"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        if [[ -d "$target_dir/.git" ]]; then
+            log_info "[DRY_RUN] Würde Repository pullen: $target_dir"
+        else
+            log_info "[DRY_RUN] Würde Repository klonen: $repo_url -> $target_dir"
+        fi
+        return 0
+    fi
+    
+    # Repository existiert bereits?
+    if [[ -d "$target_dir/.git" ]]; then
+        handle_existing_repository "$target_dir" "$full_path"
+    else
+        handle_new_repository "$repo_url" "$target_dir" "$namespace_path"
+    fi
+}
+
+# Existierendes Repository behandeln (pull)
+handle_existing_repository() {
+    local target_dir="$1"
+    local full_path="$2"
+    
+    log_verbose "Repository existiert bereits, versuche zu pullen..."
+    
+    # In Repository wechseln
+    if ! cd "$target_dir"; then
+        log_warn "Kann nicht in Verzeichnis $target_dir wechseln"
+        ((STATS_ERRORS++))
+        return 1
+    fi
+    
+    # Working Directory sauber?
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        log_warn "Repository hat lokale Änderungen - überspringe Pull: $full_path"
+        ((STATS_SKIPPED++))
+        cd - > /dev/null
+        return 0
+    fi
+    
+    # Untracked Files?
+    if [[ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ]]; then
+        log_warn "Repository hat untracked files - überspringe Pull: $full_path"
+        ((STATS_SKIPPED++))
+        cd - > /dev/null
+        return 0
+    fi
+    
+    # Aktueller Branch
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    
+    if [[ -z "$current_branch" ]] || [[ "$current_branch" == "HEAD" ]]; then
+        log_warn "Kann aktuellen Branch nicht ermitteln oder Repository ist im detached HEAD state: $full_path"
+        ((STATS_SKIPPED++))
+        cd - > /dev/null
+        return 0
+    fi
+    
+    # Pull ausführen
+    log_verbose "Pullen von Branch: $current_branch"
+    if git pull --quiet origin "$current_branch" 2>/dev/null; then
+        log_success "Repository erfolgreich gepullt: $full_path ($current_branch)"
+        ((STATS_PULLED++))
+    else
+        log_warn "Pull fehlgeschlagen: $full_path (Branch: $current_branch)"
+        ((STATS_ERRORS++))
+    fi
+    
+    cd - > /dev/null
+}
+
+# Neues Repository behandeln (clone)
+handle_new_repository() {
+    local repo_url="$1"
+    local target_dir="$2"
+    local namespace_path="$3"
+    
+    log_verbose "Repository nicht vorhanden, klone..."
+    
+    # Namespace-Verzeichnis erstellen
+    local namespace_dir="$BASE_DIR/$namespace_path"
+    mkdir -p "$namespace_dir"
+    
+    # Repository klonen
+    log_verbose "Klone: $repo_url -> $target_dir"
+    if git clone --quiet "$repo_url" "$target_dir" 2>/dev/null; then
+        log_success "Repository erfolgreich geklont: $(basename "$target_dir")"
+        ((STATS_CLONED++))
+    else
+        log_warn "Clone fehlgeschlagen: $repo_url"
+        ((STATS_ERRORS++))
+    fi
+}
+
+# Repositories von GitLab API abrufen
+fetch_repositories() {
+    log_info "Lade Repositories von GitLab..."
+    
+    local page=1
+    local total_repos=0
+    
+    while : ; do
+        log_verbose "Lade Seite $page..."
+        
+        # Projekte von API abrufen
+        local projects
+        if ! projects=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$GITLAB_API/projects?membership=true&simple=true&per_page=$PER_PAGE&page=$page" 2>/dev/null); then
+            log_error "Fehler beim Abrufen der Repositories von Seite $page"
+            return 1
+        fi
+        
+        local project_count
+        project_count=$(echo "$projects" | jq length 2>/dev/null || echo "0")
+        
+        if [[ "$project_count" -eq 0 ]]; then
+            break  # Keine weiteren Seiten
+        fi
+        
+        total_repos=$((total_repos + project_count))
+        log_verbose "Gefunden: $project_count Repositories auf Seite $page"
+        
+        # Einzelne Projekte verarbeiten
+        echo "$projects" | jq -c '.[]' | while IFS= read -r project; do
+            local repo_url namespace_path repo_name
+            
+            repo_url=$(echo "$project" | jq -r '.ssh_url_to_repo // .http_url_to_repo')
+            repo_name=$(echo "$project" | jq -r '.path')
+            namespace_path=$(echo "$project" | jq -r '.path_with_namespace' | sed "s|/$repo_name\$||")
+            
+            # Repository behandeln
+            handle_repository "$repo_url" "$namespace_path" "$repo_name"
+        done
+        
+        ((page++))
+    done
+    
+    log_info "Insgesamt gefunden: $total_repos Repositories"
+}
+
+# Statistiken anzeigen
+show_statistics() {
+    log_info "Synchronisation abgeschlossen!"
+    echo ""
+    echo "📊 Statistiken:"
+    echo "   🆕 Geklont: $STATS_CLONED"
+    echo "   🔄 Gepullt: $STATS_PULLED"
+    echo "   ⏭️  Übersprungen: $STATS_SKIPPED"
+    echo "   ❌ Fehler: $STATS_ERRORS"
+    
+    if [[ "$STATS_ERRORS" -gt 0 ]]; then
+        log_warn "Es gab $STATS_ERRORS Fehler während der Synchronisation"
+        return 1
+    fi
+    
+    log_success "Alle Repositories erfolgreich synchronisiert!"
+    return 0
+}
+
+# Hauptfunktion
+main() {
+    log_info "gitlab-clone - GitLab Repository Synchronisation Tool"
+    
+    # .env-Datei laden
+    load_env_file
+    
+    # Parameter parsen
+    parse_arguments "$@"
+    
+    # Abhängigkeiten prüfen
+    if ! check_dependencies; then
+        exit 1
+    fi
+    
+    # Parameter validieren
+    if ! validate_parameters; then
+        exit 1
+    fi
+    
+    log_info "GitLab API: $GITLAB_API"
+    log_info "Ziel-Verzeichnis: $BASE_DIR"
+    if [[ -n "$REPO_FILTER" ]]; then
+        log_info "Filter: $REPO_FILTER"
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "DRY_RUN Modus aktiv"
+    fi
+    
+    # Bestätigung für Überschreibung
+    if [[ "$DRY_RUN" == "false" ]]; then
+        confirm_overwrite
+        mkdir -p "$BASE_DIR"
+    fi
+    
+    # Repositories abrufen und verarbeiten
+    if ! fetch_repositories; then
+        exit 1
+    fi
+    
+    # Statistiken anzeigen
+    if ! show_statistics; then
+        exit 1
+    fi
+}
+
+# Script ausführen wenn direkt aufgerufen
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

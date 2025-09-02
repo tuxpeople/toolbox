@@ -1,0 +1,568 @@
+#!/usr/bin/env bash
+
+# check-images - Container Image Availability Checker
+# Prüft die Verfügbarkeit von Container-Images in verschiedenen Registries
+
+set -euo pipefail
+
+# Globale Variablen
+INPUT_FILE=""
+GITHUB_PAT="${GITHUB_PAT:-}"
+OUTPUT_FORMAT="text"
+VERBOSE=false
+DRY_RUN=false
+FORCE=false
+TIMEOUT=10
+
+# Farb-Definitionen für Logs
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Statistiken
+STATS_TOTAL=0
+STATS_FOUND=0
+STATS_NOT_FOUND=0
+STATS_AUTH_REQUIRED=0
+STATS_ERRORS=0
+STATS_SKIPPED=0
+
+# Log-Funktionen
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[VERBOSE]${NC} $1" >&2
+    fi
+}
+
+# Hilfe-Funktion
+show_help() {
+    cat << EOF
+check-images - Container Image Availability Checker
+
+VERWENDUNG:
+    check-images [OPTIONEN] [IMAGE_FILE]
+
+OPTIONEN:
+    -f, --file FILE          Datei mit Image-Namen (einer pro Zeile)
+    -i, --image IMAGE        Einzelnes Image prüfen
+    -o, --output FORMAT      Output-Format: text, json, csv (Standard: text)
+    -t, --timeout SECONDS    Timeout für HTTP-Requests (Standard: 10)
+    --github-pat TOKEN       GitHub Personal Access Token für GHCR
+    -v, --verbose            Detaillierte Ausgabe
+    -n, --dry-run            Nur anzeigen was gemacht würde
+    --force                  Überschreibe Output-Datei ohne Nachfrage
+    -h, --help               Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    GITHUB_PAT               GitHub Personal Access Token für GHCR
+
+UNTERSTÜTZTE REGISTRIES:
+    - Docker Hub (docker.io, registry-1.docker.io)
+    - GitHub Container Registry (ghcr.io)
+    - Red Hat Quay (quay.io)
+    - Google Container Registry (gcr.io, k8s.gcr.io, registry.k8s.io)
+    - Amazon ECR Public (public.ecr.aws)
+
+BEISPIELE:
+    # Einzelnes Image prüfen
+    check-images --image nginx:latest
+    check-images --image ghcr.io/owner/repo:tag
+
+    # Images aus Datei prüfen
+    echo "nginx:latest" > images.txt
+    echo "alpine:3.18" >> images.txt
+    check-images --file images.txt
+
+    # Mit GitHub Token für private GHCR Images
+    check-images --image ghcr.io/private/repo:tag --github-pat ghp_xxx
+
+    # JSON Output für weitere Verarbeitung
+    check-images --file images.txt --output json > results.json
+
+    # CSV Output für Spreadsheets
+    check-images --file images.txt --output csv > results.csv
+
+    # Verbose-Modus für Debugging
+    check-images --file images.txt --verbose
+
+DATEIFORMAT:
+    # Kommentare mit # am Zeilenanfang werden ignoriert
+    # Leere Zeilen werden ignoriert
+    
+    # Beispiel images.txt:
+    # Base Images
+    nginx:latest
+    alpine:3.18
+    ubuntu:22.04
+    
+    # Application Images
+    ghcr.io/myorg/myapp:v1.2.3
+    quay.io/prometheus/prometheus:latest
+
+HINWEISE:
+    - Timeout kann bei langsamen Registries angepasst werden
+    - Private Images erfordern entsprechende Authentifizierung
+    - Rate-Limits der Registries werden respektiert
+    - Bei 429 (Rate Limit) wird automatisch pausiert
+EOF
+}
+
+# Abhängigkeiten prüfen
+check_dependencies() {
+    local missing_deps=()
+    
+    if ! command -v curl &> /dev/null; then
+        missing_deps+=("curl")
+    fi
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_error "Installation:"
+        log_error "  macOS: brew install ${missing_deps[*]}"
+        log_error "  Linux: apt install ${missing_deps[*]} oder yum install ${missing_deps[*]}"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Parameter parsen
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -f|--file)
+                INPUT_FILE="$2"
+                shift 2
+                ;;
+            -i|--image)
+                # Einzelnes Image - temporäre Datei erstellen
+                INPUT_FILE=$(mktemp)
+                echo "$2" > "$INPUT_FILE"
+                shift 2
+                ;;
+            -o|--output)
+                OUTPUT_FORMAT="$2"
+                shift 2
+                ;;
+            -t|--timeout)
+                TIMEOUT="$2"
+                shift 2
+                ;;
+            --github-pat)
+                GITHUB_PAT="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            --force)
+                FORCE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -*)
+                log_error "Unbekannte Option: $1"
+                show_help
+                exit 1
+                ;;
+            *)
+                # Positional argument - als Input-Datei behandeln
+                INPUT_FILE="$1"
+                shift
+                ;;
+        esac
+    done
+}
+
+# Parameter validieren
+validate_parameters() {
+    if [[ -z "$INPUT_FILE" ]]; then
+        log_error "Input-Datei oder Image erforderlich"
+        log_error "Verwende --file FILE oder --image IMAGE"
+        return 1
+    fi
+    
+    if [[ ! -f "$INPUT_FILE" ]]; then
+        log_error "Input-Datei '$INPUT_FILE' nicht gefunden"
+        return 1
+    fi
+    
+    if [[ ! "$OUTPUT_FORMAT" =~ ^(text|json|csv)$ ]]; then
+        log_error "Ungültiges Output-Format: $OUTPUT_FORMAT"
+        log_error "Erlaubte Formate: text, json, csv"
+        return 1
+    fi
+    
+    if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$TIMEOUT" -lt 1 ]]; then
+        log_error "Timeout muss eine positive Zahl sein"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Registry und API-URL für Image ermitteln
+parse_image() {
+    local image="$1"
+    local registry namespace img
+    
+    # Registry, Namespace und Image-Name extrahieren
+    if [[ "$image" =~ ^([^/]+\.[^/]+)/([^/]+)/(.+)$ ]]; then
+        # registry.com/namespace/image:tag
+        registry="${BASH_REMATCH[1]}"
+        namespace="${BASH_REMATCH[2]}"
+        img="${BASH_REMATCH[3]}"
+    elif [[ "$image" =~ ^([^/]+)/([^/]+)/(.+)$ ]]; then
+        # gcr.io/project/image:tag (ohne TLD)
+        registry="${BASH_REMATCH[1]}"
+        namespace="${BASH_REMATCH[2]}"
+        img="${BASH_REMATCH[3]}"
+    elif [[ "$image" =~ ^([^/]+\.[^/]+)/(.+)$ ]]; then
+        # registry.com/image:tag
+        registry="${BASH_REMATCH[1]}"
+        namespace=""
+        img="${BASH_REMATCH[2]}"
+    elif [[ "$image" =~ ^([^/]+)/(.+)$ ]]; then
+        # namespace/image:tag (Docker Hub)
+        registry="docker.io"
+        namespace="${BASH_REMATCH[1]}"
+        img="${BASH_REMATCH[2]}"
+    else
+        # image:tag (Docker Hub official)
+        registry="docker.io"
+        namespace="library"
+        img="$image"
+    fi
+    
+    # Tag von Image trennen falls vorhanden
+    local image_name tag
+    if [[ "$img" =~ ^(.+):(.+)$ ]]; then
+        image_name="${BASH_REMATCH[1]}"
+        tag="${BASH_REMATCH[2]}"
+    else
+        image_name="$img"
+        tag="latest"
+    fi
+    
+    echo "$registry|$namespace|$image_name|$tag"
+}
+
+# API-URL für Registry generieren
+get_registry_url() {
+    local registry="$1"
+    local namespace="$2"
+    local image_name="$3"
+    local tag="$4"
+    
+    case "$registry" in
+        docker.io|registry-1.docker.io)
+            if [[ -n "$namespace" && "$namespace" != "library" ]]; then
+                echo "https://registry.hub.docker.com/v2/repositories/${namespace}/${image_name}/tags"
+            else
+                echo "https://registry.hub.docker.com/v2/repositories/library/${image_name}/tags"
+            fi
+            ;;
+        ghcr.io)
+            if [[ -n "$namespace" ]]; then
+                echo "https://ghcr.io/v2/${namespace}/${image_name}/tags/list"
+            else
+                echo "https://ghcr.io/v2/${image_name}/tags/list"
+            fi
+            ;;
+        quay.io)
+            if [[ -n "$namespace" ]]; then
+                echo "https://quay.io/api/v1/repository/${namespace}/${image_name}/tag/"
+            else
+                log_error "Quay.io erfordert einen Namespace"
+                return 1
+            fi
+            ;;
+        gcr.io|k8s.gcr.io|registry.k8s.io)
+            if [[ -n "$namespace" ]]; then
+                echo "https://${registry}/v2/${namespace}/${image_name}/tags/list"
+            else
+                echo "https://${registry}/v2/${image_name}/tags/list"
+            fi
+            ;;
+        public.ecr.aws)
+            if [[ -n "$namespace" ]]; then
+                echo "https://public.ecr.aws/v2/${namespace}/${image_name}/tags/list"
+            else
+                echo "https://public.ecr.aws/v2/library/${image_name}/tags/list"
+            fi
+            ;;
+        *)
+            log_verbose "Unbekannte Registry: $registry - versuche generische API"
+            if [[ -n "$namespace" ]]; then
+                echo "https://${registry}/v2/${namespace}/${image_name}/tags/list"
+            else
+                echo "https://${registry}/v2/${image_name}/tags/list"
+            fi
+            ;;
+    esac
+}
+
+# Einzelnes Image prüfen
+check_single_image() {
+    local image="$1"
+    local parsed registry namespace image_name tag url
+    
+    # Image parsen
+    parsed=$(parse_image "$image")
+    IFS='|' read -r registry namespace image_name tag <<< "$parsed"
+    
+    log_verbose "Prüfe Image: $image"
+    log_verbose "  Registry: $registry"
+    log_verbose "  Namespace: $namespace"
+    log_verbose "  Image: $image_name"
+    log_verbose "  Tag: $tag"
+    
+    # API-URL generieren
+    if ! url=$(get_registry_url "$registry" "$namespace" "$image_name" "$tag"); then
+        return 1
+    fi
+    
+    log_verbose "  API-URL: $url"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY_RUN] Würde prüfen: $image -> $url"
+        return 0
+    fi
+    
+    # HTTP-Request ausführen
+    local status auth_header=""
+    
+    # Authentifizierung für GHCR
+    if [[ "$registry" == "ghcr.io" && -n "$GITHUB_PAT" ]]; then
+        auth_header="-H Authorization: Bearer $GITHUB_PAT"
+    fi
+    
+    # Curl-Befehl ausführen
+    if [[ -n "$auth_header" ]]; then
+        status=$(curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" $auth_header "$url" 2>/dev/null || echo "000")
+    else
+        status=$(curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$url" 2>/dev/null || echo "000")
+    fi
+    
+    # Status auswerten und ausgeben
+    case "$status" in
+        200)
+            output_result "$image" "found" "$status" "✅ exists"
+            ((STATS_FOUND++))
+            ;;
+        401|403)
+            output_result "$image" "auth_required" "$status" "🔒 requires authentication"
+            ((STATS_AUTH_REQUIRED++))
+            ;;
+        404)
+            output_result "$image" "not_found" "$status" "❌ not found"
+            ((STATS_NOT_FOUND++))
+            ;;
+        429)
+            output_result "$image" "rate_limited" "$status" "⏳ rate limited"
+            ((STATS_ERRORS++))
+            log_warn "Rate limit erreicht - pausiere 5 Sekunden"
+            sleep 5
+            ;;
+        000)
+            output_result "$image" "timeout" "$status" "⏰ timeout"
+            ((STATS_ERRORS++))
+            ;;
+        *)
+            output_result "$image" "error" "$status" "⚠️ HTTP $status"
+            ((STATS_ERRORS++))
+            ;;
+    esac
+}
+
+# Ergebnis ausgeben (je nach Format)
+output_result() {
+    local image="$1"
+    local result="$2"
+    local status="$3"
+    local message="$4"
+    
+    case "$OUTPUT_FORMAT" in
+        text)
+            echo "$image -> $message"
+            ;;
+        json)
+            # JSON wird am Ende gesammelt ausgegeben
+            echo "{\"image\":\"$image\",\"status\":\"$result\",\"http_code\":$status}" >> /tmp/check-images-results.json
+            ;;
+        csv)
+            echo "$image,$result,$status" >> /tmp/check-images-results.csv
+            ;;
+    esac
+}
+
+# JSON/CSV Header initialisieren
+init_output_format() {
+    case "$OUTPUT_FORMAT" in
+        json)
+            echo "[" > /tmp/check-images-results.json
+            ;;
+        csv)
+            echo "image,status,http_code" > /tmp/check-images-results.csv
+            ;;
+    esac
+}
+
+# JSON/CSV Footer ausgeben
+finalize_output_format() {
+    case "$OUTPUT_FORMAT" in
+        json)
+            # Letztes Komma entfernen und Array schliessen
+            if [[ -f /tmp/check-images-results.json ]]; then
+                sed -i '' '$ s/,$//' /tmp/check-images-results.json 2>/dev/null || sed -i '$ s/,$//' /tmp/check-images-results.json
+                echo "]" >> /tmp/check-images-results.json
+                cat /tmp/check-images-results.json
+                rm -f /tmp/check-images-results.json
+            fi
+            ;;
+        csv)
+            if [[ -f /tmp/check-images-results.csv ]]; then
+                cat /tmp/check-images-results.csv
+                rm -f /tmp/check-images-results.csv
+            fi
+            ;;
+    esac
+}
+
+# Alle Images aus Datei verarbeiten
+process_images() {
+    local input_file="$1"
+    local line_num=0
+    
+    log_info "Verarbeite Images aus Datei: $input_file"
+    
+    init_output_format
+    
+    while IFS= read -r line; do
+        ((line_num++))
+        
+        # Leerzeichen entfernen
+        line=$(echo "$line" | xargs)
+        
+        # Leere Zeilen und Kommentare überspringen
+        if [[ -z "$line" || "$line" =~ ^# ]]; then
+            log_verbose "Zeile $line_num übersprungen: '$line'"
+            ((STATS_SKIPPED++))
+            continue
+        fi
+        
+        log_verbose "Verarbeite Zeile $line_num: $line"
+        ((STATS_TOTAL++))
+        
+        # Image prüfen
+        check_single_image "$line"
+        
+    done < "$input_file"
+    
+    finalize_output_format
+}
+
+# Statistiken anzeigen
+show_statistics() {
+    if [[ "$OUTPUT_FORMAT" == "text" ]]; then
+        log_info "Verarbeitung abgeschlossen!"
+        echo ""
+        echo "📊 Statistiken:"
+        echo "   📦 Gesamt geprüft: $STATS_TOTAL"
+        echo "   ✅ Gefunden: $STATS_FOUND"
+        echo "   ❌ Nicht gefunden: $STATS_NOT_FOUND"
+        echo "   🔒 Authentifizierung erforderlich: $STATS_AUTH_REQUIRED"
+        echo "   ⚠️ Fehler: $STATS_ERRORS"
+        echo "   ⏭️ Übersprungen: $STATS_SKIPPED"
+        
+        if [[ "$STATS_ERRORS" -gt 0 ]]; then
+            log_warn "Es gab $STATS_ERRORS Fehler während der Prüfung"
+            return 1
+        fi
+        
+        log_success "Alle Images erfolgreich geprüft!"
+    fi
+    
+    return 0
+}
+
+# Cleanup-Funktion
+cleanup() {
+    # Temporäre Dateien aufräumen
+    rm -f /tmp/check-images-results.json /tmp/check-images-results.csv
+    
+    # Falls temporäre Input-Datei erstellt wurde (bei --image)
+    if [[ -n "${INPUT_FILE:-}" ]] && [[ "$INPUT_FILE" =~ ^/tmp/tmp\. ]]; then
+        rm -f "$INPUT_FILE"
+    fi
+}
+
+# Trap für Cleanup
+trap cleanup EXIT
+
+# Hauptfunktion
+main() {
+    log_info "check-images - Container Image Availability Checker"
+    
+    # Parameter parsen
+    parse_arguments "$@"
+    
+    # Abhängigkeiten prüfen
+    if ! check_dependencies; then
+        exit 1
+    fi
+    
+    # Parameter validieren
+    if ! validate_parameters; then
+        exit 1
+    fi
+    
+    log_verbose "Input-Datei: $INPUT_FILE"
+    log_verbose "Output-Format: $OUTPUT_FORMAT"
+    log_verbose "Timeout: $TIMEOUT Sekunden"
+    if [[ -n "$GITHUB_PAT" ]]; then
+        log_verbose "GitHub PAT: konfiguriert"
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "DRY_RUN Modus aktiv"
+    fi
+    
+    # Images verarbeiten
+    process_images "$INPUT_FILE"
+    
+    # Statistiken anzeigen
+    if ! show_statistics; then
+        exit 1
+    fi
+}
+
+# Script ausführen wenn direkt aufgerufen
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
