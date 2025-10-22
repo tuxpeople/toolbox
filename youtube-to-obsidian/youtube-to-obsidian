@@ -15,28 +15,36 @@ from pathlib import Path
 
 
 def log_info(message):
-    """Info-Nachricht ausgeben"""
+    """Gibt eine Info-Nachricht aus"""
     print(f"[INFO] {message}", file=sys.stderr)
 
 
 def log_success(message):
-    """Erfolgs-Nachricht ausgeben"""
+    """Gibt eine Erfolgs-Nachricht aus"""
     print(f"[SUCCESS] {message}", file=sys.stderr)
 
 
 def log_error(message):
-    """Fehler-Nachricht ausgeben"""
+    """Gibt eine Fehler-Nachricht aus"""
     print(f"[ERROR] {message}", file=sys.stderr)
 
 
 def log_verbose(message, verbose=False):
-    """Verbose-Nachricht ausgeben"""
+    """Gibt eine Verbose-Nachricht aus, falls Verbose-Modus aktiv ist"""
     if verbose:
         print(f"[VERBOSE] {message}", file=sys.stderr)
 
 
 def check_dependencies(verbose=False):
-    """Prüft ob alle erforderlichen Tools installiert sind"""
+    """
+    Prüft ob alle erforderlichen Tools installiert sind
+
+    Args:
+        verbose: Falls True, gibt detaillierte Informationen aus
+
+    Returns:
+        True falls alle Abhängigkeiten vorhanden sind, sonst False
+    """
     missing_deps = []
 
     # Prüfe yt-dlp
@@ -72,7 +80,19 @@ def check_dependencies(verbose=False):
 
 
 def get_video_info(url, verbose=False):
-    """Holt Video-Metadaten mit yt-dlp"""
+    """
+    Holt Video-Metadaten mit yt-dlp
+
+    Args:
+        url: YouTube-Video URL
+        verbose: Falls True, gibt detaillierte Informationen aus
+
+    Returns:
+        Dictionary mit Video-Metadaten
+
+    Raises:
+        SystemExit: Bei Fehlern während des Abrufens
+    """
     log_info(f"Hole Video-Informationen von: {url}")
     log_verbose("Führe yt-dlp aus...", verbose)
 
@@ -106,7 +126,19 @@ def get_video_info(url, verbose=False):
 
 
 def create_summary_with_claude(video_data, verbose=False):
-    """Erstellt Zusammenfassung mit Claude CLI - OHNE Transkript"""
+    """
+    Erstellt Zusammenfassung mit Claude CLI - OHNE Transkript
+
+    Args:
+        video_data: Dictionary mit Video-Metadaten von yt-dlp
+        verbose: Falls True, gibt detaillierte Informationen aus
+
+    Returns:
+        String mit der generierten Zusammenfassung
+
+    Raises:
+        SystemExit: Bei Fehlern während der Claude-Kommunikation
+    """
     log_info("Erstelle Zusammenfassung mit Claude CLI...")
 
     # Video-Metadaten extrahieren
@@ -122,6 +154,7 @@ def create_summary_with_claude(video_data, verbose=False):
     log_verbose(f"Kanal: {channel}", verbose)
     log_verbose(f"Dauer: {duration_min} Minuten", verbose)
 
+    # Prompt für Claude zusammenstellen
     prompt = f"""Analysiere dieses YouTube-Video und erstelle eine strukturierte Zusammenfassung für Obsidian.
 
 Video: {title}
@@ -184,8 +217,18 @@ WICHTIG:
 
 
 def create_obsidian_note(video_data, summary, output_path=None, verbose=False):
-    """Erstellt Obsidian-Note mit Frontmatter"""
+    """
+    Erstellt Obsidian-Note mit Frontmatter
 
+    Args:
+        video_data: Dictionary mit Video-Metadaten
+        summary: String mit der generierten Zusammenfassung
+        output_path: Optionaler Pfad zur Ausgabedatei (None = stdout)
+        verbose: Falls True, gibt detaillierte Informationen aus
+
+    Returns:
+        String mit der vollständigen Note
+    """
     title = video_data.get('title', 'Unbekanntes Video')
     channel = video_data.get('channel', 'Unbekannter Kanal')
     video_url = video_data.get('webpage_url', '')
@@ -218,7 +261,7 @@ video_id: {video_id}
 
 """
 
-    # Vollständige Note
+    # Vollständige Note zusammenbauen
     full_note = frontmatter + header + summary
 
     # Speichern
@@ -236,7 +279,7 @@ video_id: {video_id}
 
 
 def main():
-    """Hauptfunktion"""
+    """Hauptfunktion - Koordiniert den gesamten Ablauf"""
     parser = argparse.ArgumentParser(
         description='YouTube zu Obsidian Konverter - Erstellt strukturierte Zusammenfassungen',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -312,6 +355,7 @@ Voraussetzungen:
     else:
         log_info("Ausgabe auf stdout", file=sys.stderr)
 
+    # Hinweis für detailliertere Zusammenfassungen
     log_info("", file=sys.stderr)
     log_info("💡 Hinweis: Für detailliertere Zusammenfassungen:", file=sys.stderr)
     log_info("   1. Öffne das Video auf YouTube", file=sys.stderr)
