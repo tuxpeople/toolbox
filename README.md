@@ -6,27 +6,32 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 ### Container & Registry
 - **[check-images](./check-images/)** - Prüft Verfügbarkeit von Container-Images in verschiedenen Registries
-- **[crane_fqdn](./crane_fqdn/)** - Extrahiert FQDNs für Container-Registry Firewall-Freischaltungen
+- **[crane-fqdn](./crane-fqdn/)** - Extrahiert FQDNs für Container-Registry Firewall-Freischaltungen
+- **[k8s-image-arches](./k8s-image-arches/)** - Zeigt verfügbare Architekturen für alle Container-Images in einem Kubernetes-Cluster
 
 ### Development & Build
 - **[brewfile-commenter](./brewfile-commenter/)** - Fügt automatisch Beschreibungen zu Brewfile-Einträgen hinzu
 - **[gitlab-clone](./gitlab-clone/)** - Synchronisiert alle GitLab-Repositories eines Benutzers
 - **[lima-k8s](./lima-k8s/)** - Lima-basierte Kubernetes und k3s Cluster für lokale Entwicklung
-- **[serve_this](./serve_this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
+- **[serve-this](./serve-this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
 - **[yt-get](./yt-get/)** - Einfacher Wrapper für yt-dlp zum Download von Videos und Audio
 
 ### Network & SSH
 - **[fix-ssh-key](./fix-ssh-key/)** - SSH Known Hosts reparieren und aktualisieren
 
 ### Security & Kubernetes
-- **[k8s_vuln](./k8s_vuln/)** - Scannt Kubernetes-Cluster auf Sicherheitslücken
+- **[k8s-vuln](./k8s-vuln/)** - Scannt Kubernetes-Cluster auf Sicherheitslücken
 - **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
 
 ### System Administration
 - **[fix-perms](./fix-perms/)** - macOS Benutzer-Permissions reparieren
 
+### System & Text Processing
+- **[check-repo-checksum](./check-repo-checksum/)** - Prüft RPM-Paket-Prüfsummen gegen Repository-Metadaten
+- **[sanitize-text](./sanitize-text/)** - Säubert Text-Dateien von speziellen Unicode-Zeichen
+
 ### Network & Backup
-- **[udm_backup](./udm_backup/)** - UniFi Dream Machine Backup-Tool
+- **[udm-backup](./udm-backup/)** - UniFi Dream Machine Backup-Tool
 
 ## 🚀 Schnellstart
 
@@ -43,8 +48,12 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    ./check-images --image nginx:latest
    
    # Container-Registry FQDNs extrahieren
-   cd crane_fqdn
-   ./crane_fqdn.sh nginx:latest
+   cd crane-fqdn
+   ./crane-fqdn nginx:latest
+
+   # Kubernetes Image-Architekturen anzeigen
+   cd k8s-image-arches
+   ./k8s-image-arches
    
    # Brewfile kommentieren
    cd brewfile-commenter
@@ -60,8 +69,8 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    ./fix-ssh-key example.com
    
    # Kubernetes Vulnerability Scan
-   cd k8s_vuln
-   ./k8s_vuln.sh CVE-2021-44228
+   cd k8s-vuln
+   ./k8s-vuln CVE-2021-44228
    
    # Namespace-Logs exportieren
    cd namespace-logs
@@ -76,12 +85,20 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    ./yt-get video "https://youtube.com/watch?v=..."
    
    # Lokalen HTTPS-Server starten
-   cd serve_this
-   ./serve_this
-   
+   cd serve-this
+   ./serve-this
+
+   # RPM Repository Checksums prüfen
+   cd check-repo-checksum
+   ./check-repo-checksum https://repo.example.com/centos/7/x86_64 nginx-1.20.1-1.el7.x86_64.rpm
+
+   # Text-Dateien säubern
+   cd sanitize-text
+   ./sanitize-text document.txt
+
    # UDM Backups verwalten
-   cd udm_backup
-   ./udm_backup
+   cd udm-backup
+   ./udm-backup
    ```
 
 ## 📝 Tool-Status
@@ -89,16 +106,19 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | Tool | Status | Beschreibung |
 |------|--------|--------------|
 | 🔍 check-images | ✅ **Ready** | Container Image Availability Checker |
-| 🏗️ crane_fqdn | ✅ **Ready** | Container-Registry FQDN Extraktor |
+| 🏗️ crane-fqdn | ✅ **Ready** | Container-Registry FQDN Extraktor |
+| 🏛️ k8s-image-arches | ✅ **Ready** | Kubernetes Image Architecture Analyzer |
 | 🍺 brewfile-commenter | ✅ **Ready** | Brewfile Beschreibungs-Generator |
 | 🦊 gitlab-clone | ✅ **Ready** | GitLab Repository Synchronisation Tool |
 | 🔑 fix-ssh-key | ✅ **Ready** | SSH Known Hosts Reparatur |
-| 🛡️ k8s_vuln | ✅ **Ready** | Kubernetes Vulnerability Scanner |
+| 🛡️ k8s-vuln | ✅ **Ready** | Kubernetes Vulnerability Scanner |
 | 📜 namespace-logs | ✅ **Ready** | Kubernetes Namespace Log Exporter |
 | 🚀 lima-k8s | ✅ **Ready** | Lima-basierte Kubernetes/k3s Cluster Manager |
-| 🌐 serve_this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
+| 🌐 serve-this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
 | 🛠️ fix-perms | ✅ **Ready** | macOS Permissions Reparatur-Tool |
-| 📡 udm_backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
+| 📦 check-repo-checksum | ✅ **Ready** | RPM Repository Checksum Validator |
+| 📝 sanitize-text | ✅ **Ready** | Text Unicode Sanitizer |
+| 📡 udm-backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
 | 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
 
 **Legende:**
@@ -120,19 +140,19 @@ Jedes Tool hat seinen eigenen Ordner mit:
 ./check-images/check-images --file deployment-images.txt
 
 # Container-Security in Pipeline
-./k8s_vuln/k8s_vuln.sh CVE-2021-44228 --quiet
+./k8s-vuln/k8s-vuln CVE-2021-44228 --quiet
 
 # Registry-Firewall-Regeln
-./crane_fqdn/crane_fqdn.sh my-app:latest
+./crane-fqdn/crane-fqdn my-app:latest
 ```
 
 ### Development Workflow
 ```bash
 # Lokaler HTTPS-Server
-./serve_this/serve_this -d ./build
+./serve-this/serve-this -d ./build
 
 # Brewfile dokumentieren
-./brewfile-commenter/brewfile-commenter.sh
+./brewfile-commenter/brewfile-commenter
 
 # Alle GitLab-Repositories synchronisieren
 ./gitlab-clone/gitlab-clone --verbose
@@ -144,13 +164,13 @@ Jedes Tool hat seinen eigenen Ordner mit:
 ./fix-ssh-key/fix-ssh-key production-server.com
 
 # Kubernetes-Security-Audit
-./k8s_vuln/k8s_vuln.sh CVE-2022-0492 -s CRITICAL
+./k8s-vuln/k8s-vuln CVE-2022-0492 -s CRITICAL
 
 # Kubernetes-Namespace-Logs exportieren
 ./namespace-logs/namespace-logs -n production -s "2025-08-25T10:00:00Z" -e "2025-08-25T12:00:00Z" -o ./incident-logs
 
 # UniFi Dream Machine Backups
-./udm_backup/udm_backup --dry-run
+./udm-backup/udm-backup --dry-run
 ```
 
 ## 🔧 Installation
@@ -177,15 +197,18 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | Tool | Abhängigkeiten | Installation |
 |------|----------------|--------------|
 | check-images | `curl` | Meist vorinstalliert |
-| crane_fqdn | `crane` | `go install github.com/google/go-containerregistry/cmd/crane@latest` |
+| crane-fqdn | `crane` | `go install github.com/google/go-containerregistry/cmd/crane@latest` |
+| k8s-image-arches | `kubectl`, `curl`, `jq` | `brew install kubectl jq` |
 | brewfile-commenter | `brew`, `jq` | `brew install jq` |
 | gitlab-clone | `curl`, `jq`, `git` | `brew install curl jq git` |
 | fix-ssh-key | `ssh-keygen`, `ssh-keyscan` | Meist vorinstalliert |
-| k8s_vuln | `trivy`, `kubectl` | `brew install trivy kubectl` |
+| k8s-vuln | `trivy`, `kubectl` | `brew install trivy kubectl` |
 | namespace-logs | `kubectl` | `brew install kubectl` |
 | lima-k8s | `lima` | `brew install lima` |
-| serve_this | `python3`, `openssl` | Meist vorinstalliert |
-| udm_backup | `ssh`, `scp`, `jq` | `brew install jq` |
+| serve-this | `python3`, `openssl` | Meist vorinstalliert |
+| check-repo-checksum | `curl`, `gawk`, `grep`, `sed`, `gunzip`, `sha256sum` | `brew install coreutils gawk grep gnu-sed gzip` |
+| sanitize-text | `python3` (3.6+) | `brew install python3` |
+| udm-backup | `ssh`, `scp`, `jq` | `brew install jq` |
 | yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
 
 ## 🤝 Beitragen
@@ -221,13 +244,16 @@ tool_name/
 
 - **brewfile-commenter**: 📝 Modifiziert Brewfile - erstellt automatisch Backups
 - **check-images**: 🔍 Führt HTTP-Requests zu Container-Registries durch - respektiert Rate-Limits
+- **check-repo-checksum**: 📦 Lädt RPM-Pakete herunter - verwende nur vertrauenswürdige Repositories
 - **gitlab-clone**: 🦊 Benötigt GitLab API Token - sichere Aufbewahrung erforderlich
 - **fix-perms**: 🛠️ Repariert macOS Benutzerverzeichnis-Berechtigungen - nur auf eigenen Systemen verwenden
 - **fix-ssh-key**: 🔑 Modifiziert SSH known_hosts - entfernt und fügt Host-Keys hinzu
-- **k8s_vuln**: 🛡️ Benötigt Cluster-Zugriff - Berechtigungen prüfen
+- **k8s-image-arches**: 🏛️ Benötigt Kubernetes-Cluster-Zugriff - liest imagePullSecrets
+- **k8s-vuln**: 🛡️ Benötigt Cluster-Zugriff - Berechtigungen prüfen
 - **namespace-logs**: 📜 Benötigt Kubernetes-Cluster-Zugriff und Pod-Log-Berechtigungen
-- **serve_this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten
-- **udm_backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
+- **sanitize-text**: 📝 Nicht umkehrbar - behalte Originaldateien bei kritischen Dokumenten
+- **serve-this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten
+- **udm-backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
 
 ## 📄 Lizenz
 

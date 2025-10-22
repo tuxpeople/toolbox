@@ -26,15 +26,219 @@ toolbox/
 - **Haupt-README:** Jedes Script ist im Haupt-README aufgeführt
 - **Sicherheitshinweise:** Wo nötig in Haupt-README und Script-README
 
-### Bash-Scripts
-- **Immer verwenden:** `#!/usr/bin/env bash` und `set -euo pipefail`
-- **Error-Handling:** Farbige Log-Funktionen (log_info, log_error, log_success, log_warn)
-- **Dry-Run Modi:** Für alle destruktiven Operationen (`--dry-run`, `-n`)
-- **Destructive Operations:** Immer Bestätigung verlangen, ausser Force-Modus aktiv
+### Bash-Scripts (ZWINGEND)
+
+#### Basis-Anforderungen
+- **Shebang:** `#!/usr/bin/env bash` (IMMER erste Zeile)
+- **Set-Optionen:** `set -euo pipefail` (IMMER nach Shebang und Kommentaren)
+- **Script-Header-Kommentar:** Zweck und Verwendung kurz dokumentieren
+
+#### Farb-Definitionen (STANDARD-PATTERN)
+```bash
+# Farben für Output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'  # No Color
+```
+
+#### Pflicht-Log-Funktionen (STANDARD-PATTERN)
+```bash
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[VERBOSE]${NC} $1" >&2
+    fi
+}
+```
+
+**WICHTIG:** NIEMALS `echo` direkt für Log-Ausgaben verwenden! Immer log_* Funktionen nutzen.
+
+#### Pflicht-Funktion: show_help()
+```bash
+show_help() {
+    cat << EOF
+Tool-Name - Kurzbeschreibung
+
+VERWENDUNG:
+    $0 [OPTIONEN]
+
+BESCHREIBUNG:
+    Ausführliche Beschreibung des Tools.
+
+OPTIONEN:
+    -v, --verbose            Detaillierte Ausgabe
+    -n, --dry-run            Nur anzeigen was gemacht würde
+    -f, --force              Überschreibe ohne Nachfrage
+    -h, --help               Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    VAR_NAME                 Beschreibung der Variable
+
+BEISPIELE:
+    $0                       # Standard-Verwendung
+    $0 --dry-run             # Testlauf ohne Änderungen
+    $0 --verbose             # Mit detaillierter Ausgabe
+
+VORAUSSETZUNGEN:
+    - tool1 muss installiert sein
+    - tool2 muss verfügbar sein
+
+HINWEISE:
+    - Wichtige Hinweise zur Verwendung
+    - Sicherheitsaspekte
+EOF
+}
+```
+
+#### Pflicht-Funktion: check_dependencies()
+```bash
+check_dependencies() {
+    local missing_deps=()
+
+    if ! command -v tool1 &> /dev/null; then
+        missing_deps+=("tool1")
+    fi
+
+    if ! command -v tool2 &> /dev/null; then
+        missing_deps+=("tool2")
+    fi
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_info "Installation:"
+        log_info "  macOS: brew install ${missing_deps[*]}"
+        log_info "  Linux: apt install ${missing_deps[*]} oder yum install ${missing_deps[*]}"
+        return 1
+    fi
+
+    return 0
+}
+```
+
+#### Empfohlene Funktion: parse_arguments()
+Für komplexe Scripts mit vielen Optionen:
+```bash
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -f|--force)
+                FORCE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unbekannte Option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+```
+
+#### Empfohlene Funktion: validate_parameters()
+Für Parameter-Validierung nach dem Parsen:
+```bash
+validate_parameters() {
+    if [[ -z "${REQUIRED_VAR:-}" ]]; then
+        log_error "REQUIRED_VAR ist nicht gesetzt"
+        return 1
+    fi
+
+    if [[ ! -d "${DIRECTORY:-}" ]]; then
+        log_error "Verzeichnis existiert nicht: $DIRECTORY"
+        return 1
+    fi
+
+    return 0
+}
+```
+
+#### Standard-Optionen (Pflicht wo anwendbar)
+- **`-h, --help`** - Hilfe anzeigen (PFLICHT für ALLE Scripts)
+- **`-v, --verbose`** - Detaillierte Ausgabe (PFLICHT für komplexe Scripts)
+- **`-n, --dry-run`** - Testlauf ohne Änderungen (PFLICHT für destruktive Operationen)
+- **`-f, --force`** - Überschreibe ohne Nachfrage (OPTIONAL für destruktive Operationen)
+
+#### Globale Variablen (Empfohlen)
+```bash
+# Globale Variablen am Script-Anfang
+VERBOSE=false
+DRY_RUN=false
+FORCE=false
+```
+
+#### Statistik-Tracking (Optional für komplexe Scripts)
+```bash
+# Statistiken (optional)
+STATS_TOTAL=0
+STATS_SUCCESS=0
+STATS_ERRORS=0
+STATS_SKIPPED=0
+```
+
+#### Main-Funktion Pattern (Empfohlen)
+```bash
+main() {
+    # 1. Abhängigkeiten prüfen
+    if ! check_dependencies; then
+        exit 1
+    fi
+
+    # 2. Parameter parsen
+    parse_arguments "$@"
+
+    # 3. Parameter validieren
+    if ! validate_parameters; then
+        show_help
+        exit 1
+    fi
+
+    # 4. Hauptlogik
+    # ... Script-Funktionalität ...
+
+    # 5. Abschluss/Statistiken
+    log_success "Fertig!"
+}
+
+# Script-Ausführung
+main "$@"
+```
+
+#### Weitere Best Practices
 - **Backup-Erstellung:** Vor Änderungen an wichtigen Dateien
-- **Abhängigkeits-Checks:** `check_dependencies()` Funktion
-- **Hilfe-System:** `--help` und `-h` Parameter
-- **Verbose-Modi:** `-v/--verbose` für detaillierte Ausgabe
+- **Destructive Operations:** Immer Bestätigung verlangen, ausser Force-Modus aktiv
+- **Exit-Codes:** 0 = Erfolg, 1 = Allgemeiner Fehler, 2+ = Spezifische Fehler
+- **Temporäre Dateien:** Mit `trap` automatisch löschen (`trap 'rm -rf "$TMPDIR"' EXIT`)
+- **Error-Messages:** Immer auf stderr (`>&2`) ausgeben
 
 ### Python-Scripts
 - **Shebang:** `#!/usr/bin/env python3`
@@ -221,5 +425,5 @@ Ein Tool gilt als "✅ Ready" wenn:
 
 ---
 
-**Letzte Aktualisierung:** 2025-08-23  
-**Version:** 1.2 - Verschärfte README-Anforderungen nach yt-get Erfahrung
+**Letzte Aktualisierung:** 2025-10-22
+**Version:** 1.3 - Vollständige Bash-Script Standards definiert (Log-Funktionen, show_help, check_dependencies, parse_arguments, validate_parameters, Standard-Optionen)
