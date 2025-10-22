@@ -1,4 +1,4 @@
-# Brewfile Commenter
+# brewfile-doc
 
 Ein intelligentes Bash-Script, das automatisch Beschreibungen zu allen brew- und cask-Einträgen in einem Brewfile hinzufügt.
 
@@ -32,39 +32,39 @@ cask "docker" # Pack, ship and run any application as a lightweight container
 
 ```bash
 # Script herunterladen
-curl -o brewfile-commenter https://raw.githubusercontent.com/tuxpeople/toolbox/main/brewfile-commenter/brewfile-commenter
-chmod +x brewfile-commenter
+curl -o brewfile-doc https://raw.githubusercontent.com/tuxpeople/toolbox/main/brewfile-doc/brewfile-doc
+chmod +x brewfile-doc
 ```
 
 ## 💻 Verwendung
 
 ### Grundlegende Syntax
 ```bash
-./brewfile-commenter [Brewfile]
+./brewfile-doc [Brewfile]
 ```
 
 ### Beispiele
 
 **Standard Brewfile verarbeiten:**
 ```bash
-./brewfile-commenter
+./brewfile-doc
 ```
 
 **Spezifisches Brewfile verarbeiten:**
 ```bash
-./brewfile-commenter MyBrewfile
-./brewfile-commenter /path/to/custom/Brewfile
+./brewfile-doc MyBrewfile
+./brewfile-doc /path/to/custom/Brewfile
 ```
 
 **Mit Hilfe:**
 ```bash
-./brewfile-commenter --help
+./brewfile-doc --help
 ```
 
 ## 📄 Ausgabe-Beispiel
 
 ```bash
-$ ./brewfile-commenter
+$ ./brewfile-doc
 
 [INFO] Backup erstellt: Brewfile.backup.20250822_143052
 [INFO] Verarbeite Brewfile...
@@ -95,7 +95,7 @@ $ ./brewfile-commenter
 ### Dokumentation für Teams
 ```bash
 # Brewfile für das Team dokumentieren
-./brewfile-commenter team-brewfile
+./brewfile-doc team-brewfile
 git add team-brewfile
 git commit -m "Add package descriptions to team brewfile"
 ```
@@ -103,14 +103,14 @@ git commit -m "Add package descriptions to team brewfile"
 ### Aufräumen alter Brewfiles
 ```bash
 # Verstehen was in einem alten Brewfile steht
-./brewfile-commenter legacy-brewfile
+./brewfile-doc legacy-brewfile
 # Jetzt kann man sehen, welche Pakete noch benötigt werden
 ```
 
 ### Onboarding neuer Entwickler
 ```bash
 # Entwickler-Setup dokumentieren
-./brewfile-commenter developer-setup
+./brewfile-doc developer-setup
 # Neue Teammitglieder verstehen sofort, was installiert wird
 ```
 
@@ -136,7 +136,7 @@ brew install jq
 ls -la Brewfile
 
 # Spezifischen Pfad angeben
-./brewfile-commenter /path/to/Brewfile
+./brewfile-doc /path/to/Brewfile
 ```
 
 **"Keine Beschreibung verfügbar"**

@@ -1,4 +1,4 @@
-# Container Registry FQDN Extractor
+# registry-fqdns - Container Registry FQDN Extractor
 
 Ein einfaches Bash-Script, das alle FQDNs (Fully Qualified Domain Names) extrahiert, die beim Pullen eines Container-Images kontaktiert werden müssen. Perfekt für Firewall-Freischaltungen in Unternehmensumgebungen.
 

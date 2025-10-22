@@ -6,11 +6,11 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 ### Container & Registry
 - **[check-images](./check-images/)** - Prüft Verfügbarkeit von Container-Images in verschiedenen Registries
-- **[crane-fqdn](./crane-fqdn/)** - Extrahiert FQDNs für Container-Registry Firewall-Freischaltungen
+- **[registry-fqdns](./registry-fqdns/)** - Extrahiert FQDNs für Container-Registry Firewall-Freischaltungen
 - **[k8s-image-arches](./k8s-image-arches/)** - Zeigt verfügbare Architekturen für alle Container-Images in einem Kubernetes-Cluster
 
 ### Development & Build
-- **[brewfile-commenter](./brewfile-commenter/)** - Fügt automatisch Beschreibungen zu Brewfile-Einträgen hinzu
+- **[brewfile-doc](./brewfile-doc/)** - Fügt automatisch Beschreibungen zu Brewfile-Einträgen hinzu
 - **[gitlab-clone](./gitlab-clone/)** - Synchronisiert alle GitLab-Repositories eines Benutzers
 - **[lima-k8s](./lima-k8s/)** - Lima-basierte Kubernetes und k3s Cluster für lokale Entwicklung
 - **[serve-this](./serve-this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
@@ -49,16 +49,16 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    ./check-images --image nginx:latest
    
    # Container-Registry FQDNs extrahieren
-   cd crane-fqdn
-   ./crane-fqdn nginx:latest
+   cd registry-fqdns
+   ./registry-fqdns nginx:latest
 
    # Kubernetes Image-Architekturen anzeigen
    cd k8s-image-arches
    ./k8s-image-arches
    
    # Brewfile kommentieren
-   cd brewfile-commenter
-   ./brewfile-commenter.sh
+   cd brewfile-doc
+   ./brewfile-doc.sh
    
    # GitLab Repositories synchronisieren
    cd gitlab-clone
@@ -111,9 +111,9 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | Tool | Status | Beschreibung |
 |------|--------|--------------|
 | 🔍 check-images | ✅ **Ready** | Container Image Availability Checker |
-| 🏗️ crane-fqdn | ✅ **Ready** | Container-Registry FQDN Extraktor |
+| 🏗️ registry-fqdns | ✅ **Ready** | Container-Registry FQDN Extraktor |
 | 🏛️ k8s-image-arches | ✅ **Ready** | Kubernetes Image Architecture Analyzer |
-| 🍺 brewfile-commenter | ✅ **Ready** | Brewfile Beschreibungs-Generator |
+| 🍺 brewfile-doc | ✅ **Ready** | Brewfile Beschreibungs-Generator |
 | 🦊 gitlab-clone | ✅ **Ready** | GitLab Repository Synchronisation Tool |
 | 🔑 fix-ssh-key | ✅ **Ready** | SSH Known Hosts Reparatur |
 | 🛡️ k8s-vuln | ✅ **Ready** | Kubernetes Vulnerability Scanner |
@@ -149,7 +149,7 @@ Jedes Tool hat seinen eigenen Ordner mit:
 ./k8s-vuln/k8s-vuln CVE-2021-44228 --quiet
 
 # Registry-Firewall-Regeln
-./crane-fqdn/crane-fqdn my-app:latest
+./registry-fqdns/registry-fqdns my-app:latest
 ```
 
 ### Development Workflow
@@ -158,7 +158,7 @@ Jedes Tool hat seinen eigenen Ordner mit:
 ./serve-this/serve-this -d ./build
 
 # Brewfile dokumentieren
-./brewfile-commenter/brewfile-commenter
+./brewfile-doc/brewfile-doc
 
 # Alle GitLab-Repositories synchronisieren
 ./gitlab-clone/gitlab-clone --verbose
@@ -203,9 +203,9 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | Tool | Abhängigkeiten | Installation |
 |------|----------------|--------------|
 | check-images | `curl` | Meist vorinstalliert |
-| crane-fqdn | `crane` | `go install github.com/google/go-containerregistry/cmd/crane@latest` |
+| registry-fqdns | `crane` | `go install github.com/google/go-containerregistry/cmd/crane@latest` |
 | k8s-image-arches | `kubectl`, `curl`, `jq` | `brew install kubectl jq` |
-| brewfile-commenter | `brew`, `jq` | `brew install jq` |
+| brewfile-doc | `brew`, `jq` | `brew install jq` |
 | gitlab-clone | `curl`, `jq`, `git` | `brew install curl jq git` |
 | fix-ssh-key | `ssh-keygen`, `ssh-keyscan` | Meist vorinstalliert |
 | k8s-vuln | `trivy`, `kubectl` | `brew install trivy kubectl` |
@@ -249,7 +249,7 @@ tool_name/
 
 ## 🔒 Sicherheitshinweise
 
-- **brewfile-commenter**: 📝 Modifiziert Brewfile - erstellt automatisch Backups
+- **brewfile-doc**: 📝 Modifiziert Brewfile - erstellt automatisch Backups
 - **check-images**: 🔍 Führt HTTP-Requests zu Container-Registries durch - respektiert Rate-Limits
 - **check-repo-checksum**: 📦 Lädt RPM-Pakete herunter - verwende nur vertrauenswürdige Repositories
 - **gitlab-clone**: 🦊 Benötigt GitLab API Token - sichere Aufbewahrung erforderlich
