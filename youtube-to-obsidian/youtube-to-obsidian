@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""
+YouTube zu Obsidian Konverter
+
+Erstellt strukturierte Zusammenfassungen von YouTube-Videos für Obsidian
+mit Claude CLI.
+"""
+
+import sys
+import json
+import subprocess
+import argparse
+from datetime import datetime
+from pathlib import Path
+
+
+def log_info(message):
+    """Info-Nachricht ausgeben"""
+    print(f"[INFO] {message}", file=sys.stderr)
+
+
+def log_success(message):
+    """Erfolgs-Nachricht ausgeben"""
+    print(f"[SUCCESS] {message}", file=sys.stderr)
+
+
+def log_error(message):
+    """Fehler-Nachricht ausgeben"""
+    print(f"[ERROR] {message}", file=sys.stderr)
+
+
+def log_verbose(message, verbose=False):
+    """Verbose-Nachricht ausgeben"""
+    if verbose:
+        print(f"[VERBOSE] {message}", file=sys.stderr)
+
+
+def check_dependencies(verbose=False):
+    """Prüft ob alle erforderlichen Tools installiert sind"""
+    missing_deps = []
+
+    # Prüfe yt-dlp
+    try:
+        result = subprocess.run(['yt-dlp', '--version'],
+                              capture_output=True,
+                              check=True,
+                              timeout=5)
+        log_verbose(f"yt-dlp Version: {result.stdout.decode().strip()}", verbose)
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        missing_deps.append("yt-dlp")
+
+    # Prüfe claude CLI
+    try:
+        result = subprocess.run(['claude', '-v'],
+                              capture_output=True,
+                              check=True,
+                              timeout=5)
+        log_verbose(f"Claude Version: {result.stdout.decode().strip()}", verbose)
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        missing_deps.append("claude")
+
+    if missing_deps:
+        log_error(f"Fehlende Abhängigkeiten: {', '.join(missing_deps)}")
+        log_info("Installation:")
+        if "yt-dlp" in missing_deps:
+            log_info("  yt-dlp: brew install yt-dlp")
+        if "claude" in missing_deps:
+            log_info("  claude: brew install claude-code")
+        return False
+
+    return True
+
+
+def get_video_info(url, verbose=False):
+    """Holt Video-Metadaten mit yt-dlp"""
+    log_info(f"Hole Video-Informationen von: {url}")
+    log_verbose("Führe yt-dlp aus...", verbose)
+
+    try:
+        result = subprocess.run(
+            ['yt-dlp', '--skip-download', '--print-json', '--no-warnings', url],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30
+        )
+
+        video_data = json.loads(result.stdout)
+        log_verbose(f"Video-Daten geladen: {len(result.stdout)} bytes", verbose)
+        return video_data
+
+    except subprocess.CalledProcessError as e:
+        log_error(f"Fehler beim Abrufen der Video-Daten: {e}")
+        if e.stderr:
+            log_error(f"Details: {e.stderr}")
+        sys.exit(1)
+    except subprocess.TimeoutExpired:
+        log_error("Timeout beim Abrufen der Video-Daten (30s)")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        log_error(f"Fehler beim Parsen der JSON-Antwort: {e}")
+        sys.exit(1)
+    except Exception as e:
+        log_error(f"Unerwarteter Fehler: {e}")
+        sys.exit(1)
+
+
+def create_summary_with_claude(video_data, verbose=False):
+    """Erstellt Zusammenfassung mit Claude CLI - OHNE Transkript"""
+    log_info("Erstelle Zusammenfassung mit Claude CLI...")
+
+    # Video-Metadaten extrahieren
+    title = video_data.get('title', 'Unbekanntes Video')
+    channel = video_data.get('channel', 'Unbekannter Kanal')
+    duration = video_data.get('duration', 0)
+    duration_min = duration // 60
+    video_url = video_data.get('webpage_url', '')
+    video_id = video_data.get('id', '')
+    description = video_data.get('description', '')
+
+    log_verbose(f"Video: {title}", verbose)
+    log_verbose(f"Kanal: {channel}", verbose)
+    log_verbose(f"Dauer: {duration_min} Minuten", verbose)
+
+    prompt = f"""Analysiere dieses YouTube-Video und erstelle eine strukturierte Zusammenfassung für Obsidian.
+
+Video: {title}
+Kanal: {channel}
+Dauer: {duration_min} Minuten
+URL: {video_url}
+Video-ID: {video_id}
+
+Beschreibung:
+{description[:2000] if description else 'Keine Beschreibung verfügbar'}
+
+HINWEIS: Kein Transkript verfügbar. Erstelle die Zusammenfassung basierend auf Titel und Beschreibung.
+
+Erstelle eine Markdown-Zusammenfassung mit diesen Abschnitten (OHNE zusätzliche Titel am Anfang):
+
+1. **Executive Summary (TL;DR)** - 2-3 Sätze, worum geht es?
+2. **Hauptthemen** - Die wichtigsten Konzepte (basierend auf Titel/Beschreibung)
+3. **Praktische Relevanz** - Warum ist das für einen Kubernetes/DevOps Engineer interessant?
+4. **Geschätzte Abschnitte** - Schätze sinnvolle Zeitabschnitte basierend auf der Videolänge
+   Format: [ca. 0:00-5:00](https://youtu.be/{video_id}?t=0) - Einführung
+   [ca. 5:00-15:00](https://youtu.be/{video_id}?t=300) - Hauptteil
+   etc.
+5. **Was du lernen könntest** - Erwartete Inhalte
+6. **Nächste Schritte** - Konkrete Action Items als Checkliste
+
+Nutze Emojis für bessere Übersicht. Schreibe auf Deutsch (Schweizer Rechtschreibung: ss statt ß).
+Fokussiere auf IT/DevOps/Kubernetes-Relevanz.
+
+WICHTIG:
+- Gib NUR die Zusammenfassung zurück, KEINE zusätzlichen Titel oder Header am Anfang
+- Beginne direkt mit "## 📋 Executive Summary (TL;DR)"
+- KEIN "# Video-Titel" am Anfang - das kommt schon automatisch
+"""
+
+    try:
+        log_verbose("Sende Prompt an Claude CLI...", verbose)
+        result = subprocess.run(
+            ['claude'],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120
+        )
+
+        log_verbose(f"Claude-Antwort: {len(result.stdout)} Zeichen", verbose)
+        return result.stdout.strip()
+
+    except subprocess.CalledProcessError as e:
+        log_error(f"Fehler bei Claude CLI: {e}")
+        if e.stderr:
+            log_error(f"Details: {e.stderr}")
+        sys.exit(1)
+    except subprocess.TimeoutExpired:
+        log_error("Timeout: Claude brauchte zu lange (120s)")
+        sys.exit(1)
+    except Exception as e:
+        log_error(f"Unerwarteter Fehler: {e}")
+        sys.exit(1)
+
+
+def create_obsidian_note(video_data, summary, output_path=None, verbose=False):
+    """Erstellt Obsidian-Note mit Frontmatter"""
+
+    title = video_data.get('title', 'Unbekanntes Video')
+    channel = video_data.get('channel', 'Unbekannter Kanal')
+    video_url = video_data.get('webpage_url', '')
+    video_id = video_data.get('id', '')
+    duration = video_data.get('duration', 0)
+    duration_min = duration // 60
+
+    # Frontmatter erstellen
+    frontmatter = f"""---
+aliases: []
+tags:
+  - Video
+  - Tutorial
+language: de
+title: {title}
+date: {datetime.now().strftime('%Y-%m-%d')}
+source: {video_url}
+author: {channel}
+video_id: {video_id}
+---
+
+"""
+
+    # Titel und Metadaten mit klickbarem Link
+    header = f"""# {title}
+
+**Kanal:** {channel} | **Dauer:** {duration_min} Min | **Video:** [YouTube]({video_url})
+
+---
+
+"""
+
+    # Vollständige Note
+    full_note = frontmatter + header + summary
+
+    # Speichern
+    if output_path is None:
+        # Standard: Ausgabe auf stdout
+        print(full_note)
+    else:
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(full_note, encoding='utf-8')
+        log_success(f"Zusammenfassung gespeichert: {output_file}")
+
+    log_verbose(f"Note erstellt: {len(full_note)} Zeichen", verbose)
+    return full_note
+
+
+def main():
+    """Hauptfunktion"""
+    parser = argparse.ArgumentParser(
+        description='YouTube zu Obsidian Konverter - Erstellt strukturierte Zusammenfassungen',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Beispiele:
+  # Ausgabe auf Terminal
+  %(prog)s https://www.youtube.com/watch?v=klyAhaklGNU
+
+  # In Datei speichern
+  %(prog)s https://www.youtube.com/watch?v=klyAhaklGNU output.md
+
+  # In Obsidian Vault speichern
+  %(prog)s https://www.youtube.com/watch?v=klyAhaklGNU ~/vault/notes/video.md
+
+  # Mit detaillierter Ausgabe
+  %(prog)s https://www.youtube.com/watch?v=klyAhaklGNU --verbose
+
+Hinweis:
+  Für detailliertere Zusammenfassungen kopiere das Transkript manuell von YouTube
+  und füge es der generierten Notiz hinzu.
+
+Voraussetzungen:
+  - yt-dlp: brew install yt-dlp
+  - claude: brew install claude-code
+        """
+    )
+
+    parser.add_argument(
+        'url',
+        help='YouTube-Video URL'
+    )
+
+    parser.add_argument(
+        'output',
+        nargs='?',
+        default=None,
+        help='Ausgabedatei (optional, Standard: stdout)'
+    )
+
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Detaillierte Ausgabe'
+    )
+
+    args = parser.parse_args()
+
+    log_info("YouTube zu Obsidian Konverter")
+    log_verbose("Verbose-Modus aktiviert", args.verbose)
+
+    # 1. Abhängigkeiten prüfen
+    if not check_dependencies(args.verbose):
+        sys.exit(2)
+
+    log_verbose("Alle Abhängigkeiten gefunden", args.verbose)
+
+    # 2. Video-Infos holen
+    video_data = get_video_info(args.url, args.verbose)
+    log_success(f"Video: {video_data.get('title', 'Unbekannt')}")
+    log_info(f"Kanal: {video_data.get('channel', 'Unbekannt')}")
+    log_info(f"Dauer: {video_data.get('duration', 0) // 60} Minuten")
+
+    # 3. Claude-Zusammenfassung erstellen (ohne Transkript)
+    log_info("Erstelle Zusammenfassung basierend auf Titel und Beschreibung")
+    summary = create_summary_with_claude(video_data, args.verbose)
+    log_success("Zusammenfassung erstellt")
+
+    # 4. Obsidian-Note erstellen
+    create_obsidian_note(video_data, summary, args.output, args.verbose)
+
+    if args.output:
+        log_success("Fertig!")
+    else:
+        log_info("Ausgabe auf stdout", file=sys.stderr)
+
+    log_info("", file=sys.stderr)
+    log_info("💡 Hinweis: Für detailliertere Zusammenfassungen:", file=sys.stderr)
+    log_info("   1. Öffne das Video auf YouTube", file=sys.stderr)
+    log_info("   2. Klick auf '...' → 'Transkript anzeigen'", file=sys.stderr)
+    log_info("   3. Kopiere den Text und füge ihn der Notiz hinzu", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

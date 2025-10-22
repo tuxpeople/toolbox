@@ -15,6 +15,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 - **[lima-k8s](./lima-k8s/)** - Lima-basierte Kubernetes und k3s Cluster für lokale Entwicklung
 - **[serve-this](./serve-this/)** - Schneller HTTPS/HTTP-Server für lokale Entwicklung
 - **[yt-get](./yt-get/)** - Einfacher Wrapper für yt-dlp zum Download von Videos und Audio
+- **[youtube-to-obsidian](./youtube-to-obsidian/)** - Erstellt strukturierte YouTube-Video-Zusammenfassungen für Obsidian
 
 ### Network & SSH
 - **[fix-ssh-key](./fix-ssh-key/)** - SSH Known Hosts reparieren und aktualisieren
@@ -83,7 +84,11 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    # Video/Audio Download
    cd yt-get
    ./yt-get video "https://youtube.com/watch?v=..."
-   
+
+   # YouTube-Video zu Obsidian-Note
+   cd youtube-to-obsidian
+   ./youtube-to-obsidian "https://youtube.com/watch?v=..." output.md
+
    # Lokalen HTTPS-Server starten
    cd serve-this
    ./serve-this
@@ -120,6 +125,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 📝 sanitize-text | ✅ **Ready** | Text Unicode Sanitizer |
 | 📡 udm-backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
 | 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
+| 🎬 youtube-to-obsidian | ✅ **Ready** | YouTube zu Obsidian Video-Zusammenfassungs-Generator |
 
 **Legende:**
 - ✅ **Ready** - Vollständig überarbeitet, dokumentiert und einsatzbereit
@@ -210,6 +216,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | sanitize-text | `python3` (3.6+) | `brew install python3` |
 | udm-backup | `ssh`, `scp`, `jq` | `brew install jq` |
 | yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
+| youtube-to-obsidian | `yt-dlp`, `claude`, `python3` | `brew install yt-dlp claude-code` |
 
 ## 🤝 Beitragen
 
@@ -254,6 +261,7 @@ tool_name/
 - **sanitize-text**: 📝 Nicht umkehrbar - behalte Originaldateien bei kritischen Dokumenten
 - **serve-this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten
 - **udm-backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
+- **youtube-to-obsidian**: 🎬 Nutzt Claude CLI - keine API-Kosten, erfordert Claude Code/Desktop
 
 ## 📄 Lizenz
 
