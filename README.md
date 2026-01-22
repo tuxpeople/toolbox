@@ -22,6 +22,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 
 ### Security & Kubernetes
 - **[k8s-vuln](./k8s-vuln/)** - Scannt Kubernetes-Cluster auf Sicherheitslücken
+- **[kubectl-backup](./kubectl-backup/)** - Exportiert alle Kubernetes-Ressourcen für Backup und Disaster Recovery
 - **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
 
 ### System Administration
@@ -72,7 +73,11 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    # Kubernetes Vulnerability Scan
    cd k8s-vuln
    ./k8s-vuln CVE-2021-44228
-   
+
+   # Kubernetes Cluster Backup
+   cd kubectl-backup
+   ./kubectl-backup -o cluster-backup
+
    # Namespace-Logs exportieren
    cd namespace-logs
    ./namespace-logs -n production -s "2025-08-25T13:00:00Z" -e "2025-08-25T14:00:00Z" -o ./logs
@@ -117,6 +122,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 🦊 gitlab-clone | ✅ **Ready** | GitLab Repository Synchronisation Tool |
 | 🔑 fix-ssh-key | ✅ **Ready** | SSH Known Hosts Reparatur |
 | 🛡️ k8s-vuln | ✅ **Ready** | Kubernetes Vulnerability Scanner |
+| 💾 kubectl-backup | ✅ **Ready** | Kubernetes Cluster Backup Tool |
 | 📜 namespace-logs | ✅ **Ready** | Kubernetes Namespace Log Exporter |
 | 🚀 lima-k8s | ✅ **Ready** | Lima-basierte Kubernetes/k3s Cluster Manager |
 | 🌐 serve-this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
@@ -148,6 +154,9 @@ Jedes Tool hat seinen eigenen Ordner mit:
 # Container-Security in Pipeline
 ./k8s-vuln/k8s-vuln CVE-2021-44228 --quiet
 
+# Kubernetes Cluster Backup
+./kubectl-backup/kubectl-backup -o backup-$(date +%Y-%m-%d) --force
+
 # Registry-Firewall-Regeln
 ./registry-fqdns/registry-fqdns my-app:latest
 ```
@@ -171,6 +180,9 @@ Jedes Tool hat seinen eigenen Ordner mit:
 
 # Kubernetes-Security-Audit
 ./k8s-vuln/k8s-vuln CVE-2022-0492 -s CRITICAL
+
+# Kubernetes Cluster Backup
+./kubectl-backup/kubectl-backup -o cluster-backup --verbose
 
 # Kubernetes-Namespace-Logs exportieren
 ./namespace-logs/namespace-logs -n production -s "2025-08-25T10:00:00Z" -e "2025-08-25T12:00:00Z" -o ./incident-logs
@@ -209,6 +221,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | gitlab-clone | `curl`, `jq`, `git` | `brew install curl jq git` |
 | fix-ssh-key | `ssh-keygen`, `ssh-keyscan` | Meist vorinstalliert |
 | k8s-vuln | `trivy`, `kubectl` | `brew install trivy kubectl` |
+| kubectl-backup | `kubectl`, `yq` (optional) | `brew install kubectl yq` |
 | namespace-logs | `kubectl` | `brew install kubectl` |
 | lima-k8s | `lima` | `brew install lima` |
 | serve-this | `python3`, `openssl` | Meist vorinstalliert |
@@ -257,6 +270,7 @@ tool_name/
 - **fix-ssh-key**: 🔑 Modifiziert SSH known_hosts - entfernt und fügt Host-Keys hinzu
 - **k8s-image-arches**: 🏛️ Benötigt Kubernetes-Cluster-Zugriff - liest imagePullSecrets
 - **k8s-vuln**: 🛡️ Benötigt Cluster-Zugriff - Berechtigungen prüfen
+- **kubectl-backup**: 💾 Exportiert ALLE Ressourcen inkl. Secrets - sichere Aufbewahrung erforderlich
 - **namespace-logs**: 📜 Benötigt Kubernetes-Cluster-Zugriff und Pod-Log-Berechtigungen
 - **sanitize-text**: 📝 Nicht umkehrbar - behalte Originaldateien bei kritischen Dokumenten
 - **serve-this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten

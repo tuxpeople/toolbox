@@ -1,35 +1,511 @@
 #!/usr/bin/env bash
 
-# Kontext für Backup-Verzeichnis
-CONTEXT=backup
+# kubectl-backup - Kubernetes Cluster Backup Tool
+# Exportiert alle Kubernetes-Ressourcen (cluster-weit und namespace-spezifisch) in YAML-Dateien
 
-# === CLUSTER-WEITE RESSOURCEN ===
-RESOURCES=$(kubectl api-resources --namespaced=false -o name | tr "\n" " ")
+set -euo pipefail
 
-for resource in ${RESOURCES}; do
-  rsrcs=$(kubectl get -o json "${resource}" 2>/dev/null | jq -r '.items[]?.metadata.name')
-  for r in ${rsrcs}; do
-    dir="${CONTEXT}/global/${resource}"
-    mkdir -p "${dir}"
-    echo "Exporting global ${resource} ${r}"
-    kubectl get -o yaml "${resource}" "${r}" > "${dir}/${r}.yaml"
-    kubectl get -o yaml "${resource}" "${r}" | kubectl neat > "${dir}/${r}-neat.yaml"
-  done
-done
+# Globale Variablen
+OUTPUT_DIR="backup"
+NAMESPACE_FILTER=""
+SKIP_CLEAN=false
+USE_KUBECTL_NEAT=false
+VERBOSE=false
+DRY_RUN=false
+FORCE=false
 
-# === NAMESPACE-SPEZIFISCHE RESSOURCEN ===
-NAMESPACES=$(kubectl get -o json namespaces | jq -r '.items[].metadata.name')
-RESOURCES=$(kubectl api-resources --namespaced -o name | tr "\n" " ")
+# Bereinigungsmethode (yq oder kubectl-neat)
+CLEAN_METHOD=""
 
-for ns in ${NAMESPACES}; do
-  for resource in ${RESOURCES}; do
-    rsrcs=$(kubectl -n "${ns}" get -o json "${resource}" 2>/dev/null | jq -r '.items[]?.metadata.name')
-    for r in ${rsrcs}; do
-      dir="${CONTEXT}/${ns}/${resource}"
-      mkdir -p "${dir}"
-      echo "Exporting ${resource} ${r} from namespace ${ns}"
-      kubectl -n "${ns}" get -o yaml "${resource}" "${r}" > "${dir}/${r}.yaml"
-      kubectl -n "${ns}" get -o yaml "${resource}" "${r}" | kubectl neat > "${dir}/${r}-neat.yaml"
+# Statistiken
+STATS_TOTAL=0
+STATS_SUCCESS=0
+STATS_ERRORS=0
+
+# Farben für Output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'  # No Color
+
+# Log-Funktionen
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[VERBOSE]${NC} $1" >&2
+    fi
+}
+
+log_progress() {
+    echo -e "${GREEN}[PROGRESS]${NC} $1" >&2
+}
+
+# Hilfe-Funktion
+show_help() {
+    cat << EOF
+kubectl-backup - Kubernetes Cluster Backup Tool
+
+VERWENDUNG:
+    $0 [OPTIONEN]
+
+BESCHREIBUNG:
+    Exportiert alle Kubernetes-Ressourcen (cluster-weit und namespace-spezifisch)
+    in YAML-Dateien. Erstellt sowohl vollständige als auch bereinigte (-clean)
+    Versionen der Ressourcen.
+
+OPTIONEN:
+    -o, --output-dir DIR     Output-Verzeichnis (Standard: backup)
+    -n, --namespace NS       Nur spezifischen Namespace exportieren
+    --skip-clean             Bereinigte Versionen überspringen (nur Standard-YAML)
+    --use-kubectl-neat       kubectl-neat statt yq verwenden (deprecated)
+    -v, --verbose            Detaillierte Ausgabe
+    --dry-run                Nur anzeigen was gemacht würde
+    -f, --force              Überschreibe existierendes Verzeichnis ohne Nachfrage
+    -h, --help               Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    KUBECONFIG               Pfad zur kubectl-Konfiguration
+
+BEISPIELE:
+    $0                       # Standard-Backup ins 'backup' Verzeichnis
+    $0 -o cluster-backup     # Backup ins 'cluster-backup' Verzeichnis
+    $0 -n production         # Nur 'production' Namespace
+    $0 --dry-run             # Testlauf ohne Änderungen
+    $0 --verbose             # Mit detaillierter Ausgabe
+    $0 --skip-clean          # Ohne bereinigte Versionen (nur Standard-YAML)
+    $0 --use-kubectl-neat    # Mit kubectl-neat (deprecated)
+
+VORAUSSETZUNGEN:
+    - kubectl muss installiert und konfiguriert sein
+    - Kubernetes-Cluster-Zugriff erforderlich
+    - yq ist optional (empfohlen für bereinigte YAMLs)
+    - kubectl-neat ist optional (deprecated Alternative zu yq)
+
+HINWEISE:
+    - Erstellt Verzeichnisstruktur: {output_dir}/global/{resource}/{name}.yaml
+    - Erstellt Verzeichnisstruktur: {output_dir}/{namespace}/{resource}/{name}.yaml
+    - Bereinigte Versionen haben Suffix -clean.yaml
+    - yq wird bevorzugt (aktiv maintained), kubectl-neat ist deprecated
+    - Secrets werden mit exportiert - sichere Aufbewahrung erforderlich!
+    - Bei grossen Clustern kann der Export Zeit brauchen
+
+AUSGABE-STRUKTUR:
+    backup/
+    ├── global/
+    │   ├── nodes/
+    │   │   ├── node1.yaml
+    │   │   └── node1-clean.yaml
+    │   └── clusterroles/
+    │       ├── admin.yaml
+    │       └── admin-clean.yaml
+    └── namespace1/
+        ├── deployments/
+        │   ├── app1.yaml
+        │   └── app1-clean.yaml
+        └── services/
+            ├── app1.yaml
+            └── app1-clean.yaml
+EOF
+}
+
+# Abhängigkeiten prüfen
+check_dependencies() {
+    local missing_deps=()
+
+    if ! command -v kubectl &> /dev/null; then
+        missing_deps+=("kubectl")
+    fi
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_info "Installation:"
+        log_info "  macOS: brew install ${missing_deps[*]}"
+        log_info "  Linux: apt install ${missing_deps[*]} oder yum install ${missing_deps[*]}"
+        return 1
+    fi
+
+    # kubectl Cluster-Verbindung prüfen
+    if ! kubectl cluster-info &> /dev/null; then
+        log_error "Keine Verbindung zum Kubernetes-Cluster möglich"
+        log_error "Prüfe deine kubectl-Konfiguration"
+        return 1
+    fi
+
+    # Bereinigungsmethode bestimmen (falls nicht übersprungen)
+    if [[ "$SKIP_CLEAN" == "false" ]]; then
+        if [[ "$USE_KUBECTL_NEAT" == "true" ]]; then
+            if command -v kubectl-neat &> /dev/null; then
+                CLEAN_METHOD="kubectl-neat"
+                log_info "Verwende kubectl-neat für bereinigte YAMLs (deprecated)"
+            else
+                log_warn "kubectl-neat ist nicht installiert"
+                log_info "Installation: brew install kubectl-neat"
+                log_info "Fallback: Versuche yq..."
+            fi
+        fi
+
+        # Fallback oder Standard: yq
+        if [[ -z "$CLEAN_METHOD" ]]; then
+            if command -v yq &> /dev/null; then
+                CLEAN_METHOD="yq"
+                log_info "Verwende yq für bereinigte YAMLs (empfohlen)"
+            else
+                log_warn "Weder yq noch kubectl-neat installiert - bereinigte Versionen werden übersprungen"
+                log_info "Installation: brew install yq (empfohlen)"
+                SKIP_CLEAN=true
+            fi
+        fi
+    fi
+
+    return 0
+}
+
+# Parameter parsen
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -o|--output-dir)
+                OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            -n|--namespace)
+                NAMESPACE_FILTER="$2"
+                shift 2
+                ;;
+            --skip-clean)
+                SKIP_CLEAN=true
+                shift
+                ;;
+            --use-kubectl-neat)
+                USE_KUBECTL_NEAT=true
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -f|--force)
+                FORCE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unbekannte Option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
     done
-  done
-done
+}
+
+# Parameter validieren
+validate_parameters() {
+    if [[ -n "$NAMESPACE_FILTER" ]]; then
+        if ! kubectl get namespace "$NAMESPACE_FILTER" &> /dev/null; then
+            log_error "Namespace '$NAMESPACE_FILTER' existiert nicht"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# Bestätigung für existierendes Output-Verzeichnis
+confirm_overwrite() {
+    if [[ "$FORCE" == "true" ]]; then
+        return 0
+    fi
+
+    if [[ -d "$OUTPUT_DIR" ]]; then
+        log_warn "Output-Verzeichnis '$OUTPUT_DIR' existiert bereits"
+        read -p "Möchtest du den Inhalt überschreiben? [y/N]: " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Abgebrochen"
+            exit 0
+        fi
+    fi
+}
+
+# YAML mit yq bereinigen
+clean_yaml_with_yq() {
+    yq 'del(
+        .status,
+        .metadata.uid,
+        .metadata.resourceVersion,
+        .metadata.generation,
+        .metadata.creationTimestamp,
+        .metadata.managedFields,
+        .metadata.selfLink
+    )' 2>/dev/null
+}
+
+# Einzelne Ressource exportieren
+export_resource() {
+    local resource_type="$1"
+    local resource_name="$2"
+    local namespace="$3"
+    local output_dir="$4"
+
+    ((STATS_TOTAL++))
+
+    local dir="${output_dir}/${resource_type}"
+    local file="${dir}/${resource_name}.yaml"
+    local file_clean="${dir}/${resource_name}-clean.yaml"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        if [[ -z "$namespace" ]]; then
+            echo "Würde exportieren: global ${resource_type} ${resource_name}"
+        else
+            echo "Würde exportieren: ${resource_type} ${resource_name} aus Namespace ${namespace}"
+        fi
+        ((STATS_SUCCESS++))
+        return 0
+    fi
+
+    # Verzeichnis erstellen
+    mkdir -p "$dir"
+
+    # Standard-YAML exportieren
+    local kubectl_cmd="kubectl get"
+    if [[ -n "$namespace" ]]; then
+        kubectl_cmd="$kubectl_cmd -n $namespace"
+    fi
+    kubectl_cmd="$kubectl_cmd -o yaml $resource_type $resource_name"
+
+    if eval "$kubectl_cmd" > "$file" 2>/dev/null; then
+        log_verbose "Exportiert: $file"
+
+        # Bereinigte Version erstellen (falls verfügbar)
+        if [[ "$SKIP_CLEAN" == "false" ]]; then
+            if [[ "$CLEAN_METHOD" == "yq" ]]; then
+                if cat "$file" | clean_yaml_with_yq > "$file_clean" 2>/dev/null; then
+                    log_verbose "Exportiert (clean/yq): $file_clean"
+                else
+                    log_verbose "yq-Bereinigung fehlgeschlagen für: $resource_name"
+                fi
+            elif [[ "$CLEAN_METHOD" == "kubectl-neat" ]]; then
+                if eval "$kubectl_cmd | kubectl neat" > "$file_clean" 2>/dev/null; then
+                    log_verbose "Exportiert (clean/kubectl-neat): $file_clean"
+                else
+                    log_verbose "kubectl-neat fehlgeschlagen für: $resource_name"
+                fi
+            fi
+        fi
+
+        ((STATS_SUCCESS++))
+        return 0
+    else
+        log_warn "Fehler beim Exportieren: ${resource_type}/${resource_name}"
+        ((STATS_ERRORS++))
+        return 1
+    fi
+}
+
+# Cluster-weite Ressourcen exportieren
+export_global_resources() {
+    local output_dir="$1"
+
+    log_info "Exportiere cluster-weite Ressourcen..."
+
+    # Alle cluster-weiten Ressourcen auflisten
+    local resources
+    if ! resources=$(kubectl api-resources --namespaced=false -o name 2>/dev/null); then
+        log_error "Fehler beim Auflisten der cluster-weiten Ressourcen"
+        return 1
+    fi
+
+    local global_dir="${output_dir}/global"
+    local resource_count=0
+    local total_resources
+    total_resources=$(echo "$resources" | wc -w | tr -d ' ')
+
+    for resource in $resources; do
+        ((resource_count++))
+        log_progress "Cluster-weite Ressourcen: ${resource_count}/${total_resources} - Typ: ${resource}"
+        log_verbose "Verarbeite Ressourcen-Typ: $resource"
+
+        # Alle Ressourcen dieses Typs auflisten
+        local resource_names
+        if ! resource_names=$(kubectl get "$resource" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); then
+            log_verbose "Keine Ressourcen vom Typ $resource gefunden oder Fehler beim Auflisten"
+            continue
+        fi
+
+        if [[ -z "$resource_names" ]]; then
+            log_verbose "Keine Ressourcen vom Typ $resource gefunden"
+            continue
+        fi
+
+        # Jede Ressource exportieren
+        for name in $resource_names; do
+            export_resource "$resource" "$name" "" "$global_dir"
+        done
+    done
+
+    return 0
+}
+
+# Namespace-spezifische Ressourcen exportieren
+export_namespace_resources() {
+    local output_dir="$1"
+    local namespace_filter="$2"
+
+    log_info "Exportiere namespace-spezifische Ressourcen..."
+
+    # Namespaces auflisten
+    local namespaces
+    if [[ -n "$namespace_filter" ]]; then
+        namespaces="$namespace_filter"
+        log_verbose "Verwende Namespace-Filter: $namespace_filter"
+    else
+        if ! namespaces=$(kubectl get namespaces -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); then
+            log_error "Fehler beim Auflisten der Namespaces"
+            return 1
+        fi
+    fi
+
+    # Namespace-Anzahl bestimmen
+    local namespace_count=0
+    local total_namespaces
+    total_namespaces=$(echo "$namespaces" | wc -w | tr -d ' ')
+
+    # Alle namespace-spezifischen Ressourcen auflisten
+    local resources
+    if ! resources=$(kubectl api-resources --namespaced=true -o name 2>/dev/null); then
+        log_error "Fehler beim Auflisten der namespace-spezifischen Ressourcen"
+        return 1
+    fi
+
+    local total_resources
+    total_resources=$(echo "$resources" | wc -w | tr -d ' ')
+
+    # Für jeden Namespace
+    for ns in $namespaces; do
+        ((namespace_count++))
+        log_progress "Namespace ${namespace_count}/${total_namespaces}: ${ns}"
+        log_verbose "Verarbeite Namespace: $ns"
+
+        local ns_dir="${output_dir}/${ns}"
+        local resource_count=0
+
+        # Für jeden Ressourcen-Typ
+        for resource in $resources; do
+            ((resource_count++))
+
+            # Fortschritt nur bei verbose oder bei jedem 10. Ressourcen-Typ
+            if [[ "$VERBOSE" == "true" ]] || [[ $((resource_count % 10)) -eq 0 ]]; then
+                log_progress "  └─ Namespace ${ns}: ${resource_count}/${total_resources} Ressourcen-Typen"
+            fi
+
+            log_verbose "Verarbeite Ressourcen-Typ: $resource in Namespace: $ns"
+
+            # Alle Ressourcen dieses Typs im Namespace auflisten
+            local resource_names
+            if ! resource_names=$(kubectl -n "$ns" get "$resource" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); then
+                log_verbose "Keine Ressourcen vom Typ $resource in Namespace $ns gefunden oder Fehler beim Auflisten"
+                continue
+            fi
+
+            if [[ -z "$resource_names" ]]; then
+                log_verbose "Keine Ressourcen vom Typ $resource in Namespace $ns gefunden"
+                continue
+            fi
+
+            # Jede Ressource exportieren
+            for name in $resource_names; do
+                export_resource "$resource" "$name" "$ns" "$ns_dir"
+            done
+        done
+    done
+
+    return 0
+}
+
+# Statistiken anzeigen
+show_statistics() {
+    log_success "Backup abgeschlossen"
+    log_info "Statistiken:"
+    log_info "  Total Ressourcen: $STATS_TOTAL"
+    log_info "  Erfolgreich: $STATS_SUCCESS"
+    if [[ $STATS_ERRORS -gt 0 ]]; then
+        log_warn "  Fehler: $STATS_ERRORS"
+    fi
+}
+
+# Hauptfunktion
+main() {
+    log_info "kubectl-backup - Kubernetes Cluster Backup Tool"
+
+    # 1. Parameter parsen
+    parse_arguments "$@"
+
+    # 2. Parameter validieren
+    if ! validate_parameters; then
+        show_help
+        exit 1
+    fi
+
+    # 3. Abhängigkeiten prüfen
+    if ! check_dependencies; then
+        exit 1
+    fi
+
+    # 4. Bestätigung für Überschreibung
+    if [[ "$DRY_RUN" == "false" ]]; then
+        confirm_overwrite
+    fi
+
+    # 5. Cluster-weite Ressourcen exportieren
+    if [[ -z "$NAMESPACE_FILTER" ]]; then
+        if ! export_global_resources "$OUTPUT_DIR"; then
+            log_error "Fehler beim Exportieren der cluster-weiten Ressourcen"
+            exit 1
+        fi
+    else
+        log_info "Überspringe cluster-weite Ressourcen (Namespace-Filter aktiv)"
+    fi
+
+    # 6. Namespace-spezifische Ressourcen exportieren
+    if ! export_namespace_resources "$OUTPUT_DIR" "$NAMESPACE_FILTER"; then
+        log_error "Fehler beim Exportieren der namespace-spezifischen Ressourcen"
+        exit 1
+    fi
+
+    # 7. Statistiken anzeigen
+    show_statistics
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "Dry-Run abgeschlossen - keine Dateien erstellt"
+    else
+        log_success "Alle Ressourcen exportiert nach: $OUTPUT_DIR"
+        log_warn "⚠️  WICHTIG: Backup enthält möglicherweise Secrets - sichere Aufbewahrung erforderlich!"
+    fi
+}
+
+# Script ausführen wenn direkt aufgerufen
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
