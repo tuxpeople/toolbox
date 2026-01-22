@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+# Kontext für Backup-Verzeichnis
+CONTEXT=backup
+
+# === CLUSTER-WEITE RESSOURCEN ===
+RESOURCES=$(kubectl api-resources --namespaced=false -o name | tr "\n" " ")
+
+for resource in ${RESOURCES}; do
+  rsrcs=$(kubectl get -o json "${resource}" 2>/dev/null | jq -r '.items[]?.metadata.name')
+  for r in ${rsrcs}; do
+    dir="${CONTEXT}/global/${resource}"
+    mkdir -p "${dir}"
+    echo "Exporting global ${resource} ${r}"
+    kubectl get -o yaml "${resource}" "${r}" > "${dir}/${r}.yaml"
+    kubectl get -o yaml "${resource}" "${r}" | kubectl neat > "${dir}/${r}-neat.yaml"
+  done
+done
+
+# === NAMESPACE-SPEZIFISCHE RESSOURCEN ===
+NAMESPACES=$(kubectl get -o json namespaces | jq -r '.items[].metadata.name')
+RESOURCES=$(kubectl api-resources --namespaced -o name | tr "\n" " ")
+
+for ns in ${NAMESPACES}; do
+  for resource in ${RESOURCES}; do
+    rsrcs=$(kubectl -n "${ns}" get -o json "${resource}" 2>/dev/null | jq -r '.items[]?.metadata.name')
+    for r in ${rsrcs}; do
+      dir="${CONTEXT}/${ns}/${resource}"
+      mkdir -p "${dir}"
+      echo "Exporting ${resource} ${r} from namespace ${ns}"
+      kubectl -n "${ns}" get -o yaml "${resource}" "${r}" > "${dir}/${r}.yaml"
+      kubectl -n "${ns}" get -o yaml "${resource}" "${r}" | kubectl neat > "${dir}/${r}-neat.yaml"
+    done
+  done
+done
