@@ -4,7 +4,7 @@ Exportiert alle Kubernetes-Ressourcen (cluster-weit und namespace-spezifisch) in
 
 ## 🎯 Zweck
 
-Das `kubectl-backup` Tool automatisiert das Exportieren aller Kubernetes-Ressourcen in einem Cluster oder spezifischen Namespace. Es erstellt eine vollständige Struktur von YAML-Dateien, die alle Cluster-Ressourcen (wie Nodes, ClusterRoles) und Namespace-Ressourcen (wie Deployments, Services, ConfigMaps, Secrets) enthält. Zusätzlich werden mit `kubectl-neat` bereinigte Versionen erstellt, die nur die wesentlichen Konfigurationen ohne Kubernetes-interne Metadaten enthalten.
+Das `kubectl-backup` Tool automatisiert das Exportieren aller Kubernetes-Ressourcen in einem Cluster oder spezifischen Namespace. Es erstellt eine vollständige Struktur von YAML-Dateien, die alle Cluster-Ressourcen (wie Nodes, ClusterRoles) und Namespace-Ressourcen (wie Deployments, Services, ConfigMaps, Secrets) enthält. Zusätzlich werden mit einer eingebauten yq-basierten Bereinigungsfunktion automatisch bereinigte Versionen erstellt, die nur die wesentlichen Konfigurationen ohne Kubernetes-interne Metadaten enthalten.
 
 ## 📋 Voraussetzungen
 
@@ -14,11 +14,11 @@ Das `kubectl-backup` Tool automatisiert das Exportieren aller Kubernetes-Ressour
 - **Kubernetes-Cluster-Zugriff** - kubectl muss mit einem funktionsfähigen Cluster verbunden sein
 - **Berechtigungen** - Leserechte auf alle zu exportierenden Ressourcen
 
-### Optional (für bereinigte YAMLs)
-- **yq** - YAML-Prozessor (empfohlen, aktiv maintained)
-- **kubectl-neat** - Alternative zu yq (deprecated, nicht mehr aktiv maintained)
+### Optional (für automatische YAML-Bereinigung)
+- **yq** - YAML-Prozessor für eingebaute Bereinigungsfunktion (empfohlen)
+- **kubectl-neat** - Fallback-Alternative zu yq (deprecated, nicht mehr aktiv maintained)
 
-**Hinweis**: Das Script funktioniert auch **ohne yq/kubectl-neat** - es exportiert dann nur die Standard-YAML-Dateien ohne bereinigte Versionen.
+**Hinweis**: Das Script hat eine **eingebaute Bereinigungsfunktion** die yq verwendet, um Kubernetes-Metadaten zu entfernen. Falls yq nicht verfügbar ist, wird kubectl-neat als Fallback versucht. Nur wenn **beide Tools fehlen**, werden bereinigte Versionen übersprungen und nur Standard-YAMLs exportiert.
 
 ## 🚀 Installation
 
@@ -197,15 +197,15 @@ $ kubectl-backup --verbose
 [INFO] Exportiere cluster-weite Ressourcen...
 [VERBOSE] Verarbeite Ressourcen-Typ: nodes
 [VERBOSE] Exportiert: backup/global/nodes/node-1.yaml
-[VERBOSE] Exportiert (neat): backup/global/nodes/node-1-neat.yaml
+[VERBOSE] Exportiert (clean/yq): backup/global/nodes/node-1-clean.yaml
 [VERBOSE] Verarbeite Ressourcen-Typ: clusterroles
 [VERBOSE] Exportiert: backup/global/clusterroles/admin.yaml
-[VERBOSE] Exportiert (neat): backup/global/clusterroles/admin-neat.yaml
+[VERBOSE] Exportiert (clean/yq): backup/global/clusterroles/admin-clean.yaml
 [INFO] Exportiere namespace-spezifische Ressourcen...
 [VERBOSE] Verarbeite Namespace: production
 [VERBOSE] Verarbeite Ressourcen-Typ: deployments in Namespace: production
 [VERBOSE] Exportiert: backup/production/deployments/frontend.yaml
-[VERBOSE] Exportiert (neat): backup/production/deployments/frontend-neat.yaml
+[VERBOSE] Exportiert (clean/yq): backup/production/deployments/frontend-clean.yaml
 ...
 ```
 
@@ -230,10 +230,10 @@ Würde exportieren: services frontend aus Namespace production
 
 1. **Cluster-Verbindung prüfen**: Stellt sicher, dass kubectl korrekt konfiguriert ist
 2. **Abhängigkeiten prüfen**: Validiert, dass kubectl verfügbar ist
-3. **Bereinigungsmethode wählen** (optional):
-   - **Standard**: yq (empfohlen, aktiv maintained)
-   - **Alternative**: kubectl-neat (via `--use-kubectl-neat`, deprecated)
-   - **Überspringen**: `--skip-clean`
+3. **Bereinigungsmethode wählen**:
+   - **Standard**: yq mit eingebauter Bereinigungsfunktion (empfohlen)
+   - **Fallback**: kubectl-neat (via `--use-kubectl-neat`, deprecated)
+   - **Überspringen**: `--skip-clean` oder automatisch wenn beide Tools fehlen
 4. **Cluster-weite Ressourcen exportieren**:
    - Listet alle cluster-weiten Ressourcen-Typen auf (via `kubectl api-resources --namespaced=false`)
    - Zeigt Fortschritt: `[PROGRESS] Cluster-weite Ressourcen: 1/25 - Typ: nodes`
@@ -246,8 +246,8 @@ Würde exportieren: services frontend aus Namespace production
    - Zeigt Sub-Fortschritt: `[PROGRESS]   └─ Namespace production: 10/67 Ressourcen-Typen`
    - Erstellt YAML-Dateien unter `{output_dir}/{namespace}/{resource_type}/{name}.yaml`
 6. **Bereinigte Versionen erstellen**:
-   - Mit `yq` (Standard) oder `kubectl-neat` werden bereinigte Versionen ohne Kubernetes-Metadaten erstellt
-   - Entfernt: `.status`, `.metadata.uid`, `.metadata.resourceVersion`, `.metadata.generation`, `.metadata.creationTimestamp`, `.metadata.managedFields`, `.metadata.selfLink`
+   - Mit eingebauter yq-Bereinigungsfunktion (Standard) oder kubectl-neat (Fallback) werden bereinigte Versionen ohne Kubernetes-Metadaten erstellt
+   - Die eingebaute Funktion entfernt automatisch: `.status`, `.metadata.uid`, `.metadata.resourceVersion`, `.metadata.generation`, `.metadata.creationTimestamp`, `.metadata.managedFields`, `.metadata.selfLink`
    - Suffixiert mit `-clean.yaml`
 7. **Statistiken anzeigen**: Zeigt Anzahl exportierter Ressourcen und Fehler an
 
@@ -267,9 +267,9 @@ kubectl-backup -o "backup-$(date +%Y-%m-%d)" --force
 # Vollständigen Cluster exportieren
 kubectl-backup -o migration-source --verbose
 
-# Später: Ressourcen im neuen Cluster anwenden
+# Später: Ressourcen im neuen Cluster anwenden (bereinigte Versionen)
 cd migration-source
-for yaml in $(find . -name "*-neat.yaml"); do
+for yaml in $(find . -name "*-clean.yaml"); do
   kubectl apply -f "$yaml"
 done
 ```
@@ -299,8 +299,8 @@ done
 
 ### Development Environment Snapshot
 ```bash
-# Entwicklungs-Cluster sichern
-kubectl-backup -o dev-snapshot --skip-neat
+# Entwicklungs-Cluster sichern (ohne bereinigte Versionen)
+kubectl-backup -o dev-snapshot --skip-clean
 
 # Später wiederherstellen
 kubectl apply -f dev-snapshot/
@@ -321,17 +321,18 @@ kubectl apply -f dev-snapshot/
 - **Parallele Ausführung**: Aktuell keine Parallelisierung - sequenzieller Export
 - **Minimal-Modus**: Ohne yq/kubectl-neat ist das Script am schnellsten (nur Standard-YAMLs)
 
-### yq vs kubectl-neat
-- **yq (empfohlen)**:
+### Bereinigungsmethoden
+- **yq mit eingebauter Funktion (empfohlen)**:
+  - Das Script hat eine eigene Bereinigungsfunktion die yq verwendet
+  - Entfernt automatisch alle Kubernetes-Metadaten (status, uid, resourceVersion, etc.)
   - Aktiv maintained, zuverlässig, universell einsetzbar
-  - Standard-Tool für YAML-Verarbeitung
   - Installation: `brew install yq`
-- **kubectl-neat (deprecated)**:
+- **kubectl-neat (Fallback, deprecated)**:
+  - Wird nur verwendet wenn yq nicht verfügbar ist oder via `--use-kubectl-neat` explizit gewählt
   - Nicht mehr aktiv maintained
-  - Kann weiterhin verwendet werden (via `--use-kubectl-neat`)
   - Installation: `brew install kubectl-neat`
 - **Bereinigte YAMLs**: Einfacher zu lesen, zu versionieren und für Git geeignet
-- **Automatisches Fallback**: Falls yq fehlt, wird kubectl-neat versucht; falls beides fehlt, werden bereinigte Versionen übersprungen
+- **Automatisches Fallback**: yq (mit eingebauter Funktion) → kubectl-neat → keine Bereinigung
 
 ### Ressourcen-Filter
 - **Alle Ressourcen**: Exportiert wirklich ALLE API-Ressourcen
@@ -342,18 +343,18 @@ kubectl apply -f dev-snapshot/
 
 ### Script funktioniert ohne yq/kubectl-neat
 ```bash
-# Das Script benötigt nur kubectl
+# Das Script benötigt nur kubectl als Pflicht-Abhängigkeit
 kubectl-backup -o backup
 
-# Ausgabe:
+# Ausgabe wenn weder yq noch kubectl-neat verfügbar:
 [INFO] kubectl-backup - Kubernetes Cluster Backup Tool
 [WARN] Weder yq noch kubectl-neat installiert - bereinigte Versionen werden übersprungen
-[INFO] Installation: brew install yq (empfohlen)
+[INFO] Installation: brew install yq (empfohlen für eingebaute Bereinigungsfunktion)
 [INFO] Exportiere cluster-weite Ressourcen...
 # ... Export läuft normal, nur ohne -clean.yaml Dateien
 ```
 
-**Ergebnis**: Alle Standard-YAMLs werden exportiert, nur die bereinigten `-clean.yaml` Versionen fehlen.
+**Ergebnis**: Alle Standard-YAMLs werden exportiert, nur die bereinigten `-clean.yaml` Versionen fehlen, da die eingebaute Bereinigungsfunktion yq benötigt.
 
 ### Fehler: "Keine Verbindung zum Kubernetes-Cluster möglich"
 ```bash
