@@ -28,6 +28,9 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 ### System Administration
 - **[fix-perms](./fix-perms/)** - macOS Benutzer-Permissions reparieren
 
+### Document Processing
+- **[pdf-split](./pdf-split/)** - Teilt ein PDF in einzelne Seiten auf
+
 ### System & Text Processing
 - **[check-repo-checksum](./check-repo-checksum/)** - Prüft RPM-Paket-Prüfsummen gegen Repository-Metadaten
 - **[sanitize-text](./sanitize-text/)** - Säubert Text-Dateien von speziellen Unicode-Zeichen
@@ -106,6 +109,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd sanitize-text
    ./sanitize-text document.txt
 
+   # PDF in einzelne Seiten aufteilen
+   cd pdf-split
+   ./pdf-split document.pdf output/
+
    # UDM Backups verwalten
    cd udm-backup
    ./udm-backup
@@ -128,6 +135,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 🌐 serve-this | ✅ **Ready** | Lokaler HTTPS/HTTP Development Server |
 | 🛠️ fix-perms | ✅ **Ready** | macOS Permissions Reparatur-Tool |
 | 📦 check-repo-checksum | ✅ **Ready** | RPM Repository Checksum Validator |
+| 📄 pdf-split | ✅ **Ready** | PDF Seiten-Splitter |
 | 📝 sanitize-text | ✅ **Ready** | Text Unicode Sanitizer |
 | 📡 udm-backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
 | 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
@@ -226,6 +234,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | lima-k8s | `lima` | `brew install lima` |
 | serve-this | `python3`, `openssl` | Meist vorinstalliert |
 | check-repo-checksum | `curl`, `gawk`, `grep`, `sed`, `gunzip`, `sha256sum` | `brew install coreutils gawk grep gnu-sed gzip` |
+| pdf-split | `python3` mit venv | `brew install python3` |
 | sanitize-text | `python3` (3.6+) | `brew install python3` |
 | udm-backup | `ssh`, `scp`, `jq` | `brew install jq` |
 | yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
@@ -272,6 +281,7 @@ tool_name/
 - **k8s-vuln**: 🛡️ Benötigt Cluster-Zugriff - Berechtigungen prüfen
 - **kubectl-backup**: 💾 Exportiert ALLE Ressourcen inkl. Secrets - sichere Aufbewahrung erforderlich
 - **namespace-logs**: 📜 Benötigt Kubernetes-Cluster-Zugriff und Pod-Log-Berechtigungen
+- **pdf-split**: 📄 Überschreibt existierende Dateien ohne Warnung - Dry-Run empfohlen
 - **sanitize-text**: 📝 Nicht umkehrbar - behalte Originaldateien bei kritischen Dokumenten
 - **serve-this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten
 - **udm-backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
