@@ -26,6 +26,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 - **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
 
 ### Shell & Terminal
+- **[sync-toolbox-links](./sync-toolbox-links/)** - Symlinks in ~/bin für alle Toolbox-Scripts erstellen und verwalten
 - **[timestamped-history](./timestamped-history/)** - Bash-History mit Timestamps anzeigen und filtern
 
 ### System Administration
@@ -49,7 +50,12 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd toolbox
    ```
 
-2. Gewünschtes Tool verwenden:
+2. Symlinks bootstrappen (einmalig):
+   ```bash
+   ./sync-toolbox-links/sync-toolbox-links
+   ```
+
+3. Gewünschtes Tool verwenden:
    ```bash
    # Container-Images Verfügbarkeit prüfen
    cd check-images
@@ -147,6 +153,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 📡 udm-backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
 | 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
 | 🎬 youtube-to-obsidian | ✅ **Ready** | YouTube zu Obsidian Video-Zusammenfassungs-Generator |
+| 🔗 sync-toolbox-links | ✅ **Ready** | Toolbox-Symlinks in ~/bin verwalten |
 | 📜 timestamped-history | ✅ **Ready** | Bash-History mit Timestamps anzeigen |
 
 **Legende:**
@@ -247,6 +254,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | udm-backup | `ssh`, `scp`, `jq` | `brew install jq` |
 | yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
 | youtube-to-obsidian | `yt-dlp`, `claude`, `python3` | `brew install yt-dlp claude-code` |
+| sync-toolbox-links | `bash` 4+, `find` | `brew install bash` |
 | timestamped-history | `awk` | Meist vorinstalliert |
 
 ## 🤝 Beitragen

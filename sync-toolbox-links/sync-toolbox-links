@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# sync-toolbox-links
+# Erstellt/aktualisiert Symlinks in ~/bin für alle Skripte im Toolbox-Repo.
+# Portabel für macOS/Linux, bevorzugt GNU coreutils falls vorhanden.
+
+set -euo pipefail
+
+# ---------------------------------
+# Konfiguration (anpassen/overridebar per Env oder CLI)
+# ---------------------------------
+
+# ROOT automatisch aus dem eigenen Standort im Repo ableiten
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${ROOT:-$(dirname "$SCRIPT_DIR")}"
+BIN="${BIN:-$HOME/bin}"
+
+KEEP_EXT=${KEEP_EXT:-0}      # 0 = .sh/.py/.pl Endungen entfernen, 1 = behalten
+DRYRUN=${DRYRUN:-0}          # 1 = nur anzeigen, nichts ändern
+VERBOSE=${VERBOSE:-1}        # 0 = still, 1 = loggen
+CHMOD_EXEC=${CHMOD_EXEC:-1}  # 1 = fehlende x-Bits setzen
+
+# Dateien ignorieren (Basename, case-insensitive)
+IGNORE_RE='^(readme(\..*)?|license(\..*)?|claude\..*)$'
+
+usage() {
+  cat <<EOF
+Usage: $0 [--keep-ext] [--dry-run|-n] [--quiet|-q] [--no-chmod] [--root DIR] [--bin DIR]
+Env: ROOT, BIN, KEEP_EXT, DRYRUN, VERBOSE, CHMOD_EXEC
+EOF
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --keep-ext) KEEP_EXT=1 ;;
+    --dry-run|-n) DRYRUN=1 ;;
+    --quiet|-q) VERBOSE=0 ;;
+    --no-chmod) CHMOD_EXEC=0 ;;
+    --root) ROOT="$2"; shift ;;
+    --bin) BIN="$2"; shift ;;
+    -h|--help) usage ;;
+    *) echo "Unknown arg: $1"; usage ;;
+  esac
+  shift
+done
+
+log(){ [[ $VERBOSE -eq 1 ]] && echo "$@"; }
+doit(){ if [[ $DRYRUN -eq 1 ]]; then echo "[dry-run] $*"; else eval "$@"; fi; }
+
+# ---------------------------------
+# Pfadauflösung (GNU → POSIX → Python)
+# ---------------------------------
+resolve_path() {
+  local p="$1"
+  if command -v greadlink >/dev/null 2>&1; then greadlink -f -- "$p" && return 0; fi
+  if command -v grealpath  >/dev/null 2>&1; then grealpath -- "$p"      && return 0; fi
+  if command -v readlink   >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then readlink -f -- "$p" && return 0; fi
+  if command -v python3    >/dev/null 2>&1; then
+    python3 - "$p" <<'PY' || return 1
+import os,sys
+print(os.path.realpath(sys.argv[1]))
+PY
+    return 0
+  fi
+  (cd -P -- "$(dirname -- "$p")" 2>/dev/null && printf "%s/%s\n" "$(pwd)" "$(basename -- "$p")") || return 1
+}
+
+mkdir -p "$BIN"
+
+# Kanonischer ROOT (verhindert /Users/... vs /Volumes/...)
+CANON_ROOT="$(resolve_path "$ROOT")"
+
+# ---------------------------------
+# Kandidaten einsammeln (exec-Bit ODER typische Endungen)
+# .git prunen für Speed
+# ---------------------------------
+mapfile -d '' FILES < <(
+  find "$ROOT" \
+    -path "$ROOT/.git" -prune -o \
+    -type f \( -perm -u=x -o -perm -g=x -o -perm -o=x -o -iname "*.sh" -o -iname "*.py" -o -iname "*.pl" \) \
+    -print0
+)
+
+declare -A WANT
+declare -A SEEN   # zur Kollisionserkennung
+
+cmd_name() {
+  local f="$1" base lower
+  base="$(basename "$f")"
+  lower="${base,,}"
+  if [[ $KEEP_EXT -eq 0 && "$lower" =~ \.(sh|py|pl)$ ]]; then
+    echo "${base%.*}"
+  else
+    echo "$base"
+  fi
+}
+
+for f in "${FILES[@]}"; do
+  bn="$(basename "$f")"
+  lower="${bn,,}"
+  [[ "$lower" =~ $IGNORE_RE ]] && continue
+
+  # Linkname bestimmen & Kollisionen früh erkennen
+  name="$(cmd_name "$f")"
+  if [[ -n "${SEEN[$name]+x}" && "${SEEN[$name]}" != "$f" ]]; then
+    echo "⚠️  Namenskollision: '$name' referenziert mehrere Dateien:"
+    echo "    - ${SEEN[$name]}"
+    echo "    - $f"
+    continue
+  fi
+  SEEN[$name]="$f"
+
+  link="${BIN}/${name}"
+  WANT["$link"]=1
+
+  # optional: fehlendes x-Bit setzen
+  if [[ $CHMOD_EXEC -eq 1 && ! -x "$f" ]]; then
+    doit "chmod +x $(printf '%q' "$f")"
+  fi
+
+  # Kanonischer Zielpfad der Datei
+  CANON_F="$(resolve_path "$f")"
+
+  if [[ -L "$link" ]]; then
+    resolved="$(resolve_path "$link" || true)"
+
+    if [[ -n "$resolved" && "$resolved" == "$CANON_F" ]]; then
+      log "✓ bereits korrekt: $link"
+      continue
+    fi
+
+    if [[ -n "$resolved" && "$resolved" == "$CANON_ROOT"* ]]; then
+      log "↺ aktualisiere Link: $link"
+      doit "ln -sfn $(printf '%q' "$CANON_F") $(printf '%q' "$link")"
+      continue
+    fi
+
+    echo "⚠️  Konflikt: $link zeigt auf '$resolved' (ausserhalb von $CANON_ROOT). Überspringe."
+    continue
+  fi
+
+  if [[ -e "$link" && ! -L "$link" ]]; then
+    echo "⚠️  $link existiert bereits (kein Symlink). Überspringe."
+    continue
+  fi
+
+  log "＋ linke $(basename "$f") → $link"
+  doit "ln -s $(printf '%q' "$CANON_F") $(printf '%q' "$link")"
+done
+
+# ---------------------------------
+# Aufräumen: entferne Symlinks in BIN, die ins ROOT zeigen, aber nicht mehr gewollt sind
+# ---------------------------------
+while IFS= read -r -d '' link; do
+  resolved="$(resolve_path "$link" || true)"
+  if [[ -n "$resolved" && "$resolved" == "$CANON_ROOT"* ]]; then
+    if [[ -z "${WANT["$link"]+x}" ]]; then
+      log "－ entferne veralteten Link: $link"
+      doit "rm -f $(printf '%q' "$link")"
+    fi
+  fi
+done < <(find "$BIN" -maxdepth 1 -type l -print0)
+
+log "Fertig."
