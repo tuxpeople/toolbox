@@ -9,8 +9,18 @@ set -euo pipefail
 # Konfiguration (anpassen/overridebar per Env oder CLI)
 # ---------------------------------
 
-# ROOT automatisch aus dem eigenen Standort im Repo ableiten
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ROOT automatisch aus dem echten Script-Pfad ableiten (Symlinks auflösen)
+_self="${BASH_SOURCE[0]}"
+while [[ -L "$_self" ]]; do
+    _target="$(readlink "$_self")"
+    if [[ "$_target" = /* ]]; then
+        _self="$_target"
+    else
+        _self="$(dirname "$_self")/$_target"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$_self")" && pwd)"
+unset _self _target
 ROOT="${ROOT:-$(dirname "$SCRIPT_DIR")}"
 BIN="${BIN:-$HOME/bin}"
 
