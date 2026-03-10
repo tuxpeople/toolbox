@@ -25,6 +25,9 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 - **[kubectl-backup](./kubectl-backup/)** - Exportiert alle Kubernetes-Ressourcen für Backup und Disaster Recovery
 - **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
 
+### Shell & Terminal
+- **[timestamped-history](./timestamped-history/)** - Bash-History mit Timestamps anzeigen und filtern
+
 ### System Administration
 - **[fix-perms](./fix-perms/)** - macOS Benutzer-Permissions reparieren
 
@@ -109,6 +112,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd sanitize-text
    ./sanitize-text document.txt
 
+   # Bash-History mit Timestamps anzeigen
+   cd timestamped-history
+   ./timestamped-history -n 50
+
    # PDF in einzelne Seiten aufteilen
    cd pdf-split
    ./pdf-split document.pdf output/
@@ -140,6 +147,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 📡 udm-backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
 | 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
 | 🎬 youtube-to-obsidian | ✅ **Ready** | YouTube zu Obsidian Video-Zusammenfassungs-Generator |
+| 📜 timestamped-history | ✅ **Ready** | Bash-History mit Timestamps anzeigen |
 
 **Legende:**
 - ✅ **Ready** - Vollständig überarbeitet, dokumentiert und einsatzbereit
@@ -239,6 +247,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | udm-backup | `ssh`, `scp`, `jq` | `brew install jq` |
 | yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
 | youtube-to-obsidian | `yt-dlp`, `claude`, `python3` | `brew install yt-dlp claude-code` |
+| timestamped-history | `awk` | Meist vorinstalliert |
 
 ## 🤝 Beitragen
 
@@ -286,6 +295,7 @@ tool_name/
 - **serve-this**: 🌐 Macht Dateien im Netzwerk zugänglich - sensible Daten beachten
 - **udm-backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
 - **youtube-to-obsidian**: 🎬 Nutzt Claude CLI - keine API-Kosten, erfordert Claude Code/Desktop
+- **timestamped-history**: 📜 Liest ~/.bash_history - enthält möglicherweise sensible Befehlsargumente (Passwörter, Tokens)
 
 ## 📄 Lizenz
 
