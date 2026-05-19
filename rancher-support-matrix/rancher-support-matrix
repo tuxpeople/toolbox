@@ -1,0 +1,331 @@
+#!/usr/bin/env bash
+
+# rancher-support-matrix - Rancher Upgrade Support-Matrix
+# Zeigt kompatible Kubernetes-, RKE2- und Chart-Versionen für Rancher-Upgrades
+
+set -euo pipefail
+
+# Globale Variablen
+FALLBACK_RANCHER="2.13.4"
+DATA_FILE="${HOME}/Downloads/rancher-data.json"
+DATA_MAX_AGE_DAYS=3
+CHARTS="rancher-backup rancher-monitoring rancher-logging longhorn rancher-compliance"
+RANCHER_CHANNEL="stable"
+RANCHER_INDEX_URL=""
+CURRENT_RANCHER=""
+FORCE_REFRESH=false
+VERBOSE=false
+DRY_RUN=false
+
+# Farben für Output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'  # No Color
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[VERBOSE]${NC} $1" >&2
+    fi
+}
+
+show_help() {
+    cat << EOF
+rancher-support-matrix - Rancher Upgrade Support-Matrix
+
+VERWENDUNG:
+    $0 [OPTIONEN]
+
+BESCHREIBUNG:
+    Zeigt verfügbare Rancher-Versionen (neuer als die aktuell installierte)
+    mit kompatiblen Kubernetes-Versionen, maximaler RKE2-Version und den
+    neusten Chart-Versionen für rancher-backup, rancher-monitoring,
+    rancher-logging, longhorn und rancher-compliance.
+
+OPTIONEN:
+    -c, --channel CHANNEL    Release-Channel: latest, stable, alpha
+                             (Standard: ${RANCHER_CHANNEL})
+    -u, --index-url URL      Vollständige Index-URL, überschreibt --channel
+                             (z.B. für Rancher Prime/Enterprise)
+    -r, --refresh            Daten-Datei neu herunterladen (ignoriert Cache)
+    -d, --data-file PFAD     Pfad zur Daten-Datei
+                             (Standard: ~/Downloads/rancher-data.json)
+    -b, --base-version VER   Basis-Rancher-Version wenn kein Cluster erreichbar
+                             (Standard: ${FALLBACK_RANCHER})
+    -v, --verbose            Detaillierte Ausgabe
+    -n, --dry-run            Nur anzeigen was gemacht würde
+    -h, --help               Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    KUBECONFIG               Pfad zur kubectl-Konfiguration
+
+BEISPIELE:
+    $0                           # Standard (Community, stable Channel)
+    $0 --channel latest          # Latest-Channel verwenden
+    $0 --channel alpha           # Alpha-Channel verwenden
+    $0 --index-url URL           # Eigene Index-URL (z.B. für Rancher Prime)
+    $0 --refresh                 # Mit frisch heruntergeladenen Daten
+    $0 --verbose                 # Mit detaillierter Ausgabe
+    $0 --base-version 2.8.0      # Versionen ab 2.8.0 anzeigen
+
+VORAUSSETZUNGEN:
+    - helm muss installiert sein (für Cluster-Versionserkennung)
+    - jq muss installiert sein
+    - curl muss installiert sein
+    - yq muss installiert sein
+
+HINWEISE:
+    - Standard-Index: https://releases.rancher.com/server-charts/<channel>/index.yaml
+    - Daten-Datei wird für ${DATA_MAX_AGE_DAYS} Tage gecacht
+    - Ohne Cluster-Zugriff wird die Basis-Version als Ausgangspunkt verwendet
+EOF
+}
+
+check_dependencies() {
+    local missing_deps=()
+
+    for dep in helm jq curl yq; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_info "Installation:"
+        log_info "  macOS: brew install ${missing_deps[*]}"
+        log_info "  Linux: apt install ${missing_deps[*]} oder yum install ${missing_deps[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -c|--channel)
+                RANCHER_CHANNEL="$2"
+                shift 2
+                ;;
+            -u|--index-url)
+                RANCHER_INDEX_URL="$2"
+                shift 2
+                ;;
+            -r|--refresh)
+                FORCE_REFRESH=true
+                shift
+                ;;
+            -d|--data-file)
+                DATA_FILE="$2"
+                shift 2
+                ;;
+            -b|--base-version)
+                FALLBACK_RANCHER="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unbekannte Option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+get_current_rancher() {
+    local remote_version
+    remote_version=$(helm list -n cattle-system -o json 2>/dev/null \
+        | jq -rc '.[] | select(.name == "rancher").app_version' 2>/dev/null \
+        | sed 's/v//g') || true
+
+    CURRENT_RANCHER="${remote_version:-${FALLBACK_RANCHER}}"
+
+    if [[ -n "${remote_version:-}" ]]; then
+        log_verbose "Aktuelle Rancher-Version aus Cluster: ${CURRENT_RANCHER}"
+    else
+        log_warn "Keine Rancher-Version aus Cluster ermittelt, verwende Basis-Version: ${CURRENT_RANCHER}"
+    fi
+}
+
+get_rancherdata() {
+    log_info "Lade Rancher-Daten von GitHub herunter..."
+
+    local download_url
+    download_url=$(curl -s https://api.github.com/repos/rancher/rancher/releases/latest \
+        | jq -r '.assets[] | select(.name=="rancher-data.json") | .browser_download_url')
+
+    if [[ -z "${download_url:-}" ]]; then
+        log_error "Download-URL für rancher-data.json nicht gefunden"
+        return 1
+    fi
+
+    log_verbose "Download-URL: ${download_url}"
+    mkdir -p "$(dirname "${DATA_FILE}")"
+    curl -Ls "${download_url}" > "${DATA_FILE}"
+    log_success "Daten-Datei aktualisiert: ${DATA_FILE}"
+}
+
+ensure_data_file() {
+    if [[ "$FORCE_REFRESH" == "true" ]]; then
+        log_info "Erzwinge Aktualisierung der Daten-Datei"
+        get_rancherdata
+        return
+    fi
+
+    if [[ ! -f "${DATA_FILE}" ]]; then
+        log_info "Daten-Datei nicht vorhanden, lade herunter"
+        get_rancherdata
+        return
+    fi
+
+    # Datei-Alter prüfen (macOS/Linux kompatibel via find)
+    if [[ -n "$(find "${DATA_FILE}" -mtime "+${DATA_MAX_AGE_DAYS}" 2>/dev/null)" ]]; then
+        log_info "Daten-Datei älter als ${DATA_MAX_AGE_DAYS} Tage, aktualisiere"
+        get_rancherdata
+    else
+        log_verbose "Verwende gecachte Daten-Datei: ${DATA_FILE}"
+    fi
+}
+
+print_matrix() {
+    # Header-Zeile aufbauen (tr statt ${var^^} für bash 3 Kompatibilität)
+    local header="RANCHER_VERSION KUBE_VERSION_CONSTRAINT MAX_RKE2"
+    for chart in $CHARTS; do
+        header+=" $(echo "$chart" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
+    done
+    echo "$header"
+
+    # Rancher-Index einmal laden
+    local rancher_index_yaml
+    log_verbose "Lade Rancher-Index: ${RANCHER_INDEX_URL}"
+    rancher_index_yaml=$(curl -s "${RANCHER_INDEX_URL}")
+    if [[ -z "${rancher_index_yaml:-}" ]]; then
+        log_error "Rancher-Index konnte nicht geladen werden: ${RANCHER_INDEX_URL}"
+        return 1
+    fi
+
+    # Versionen > CURRENT_RANCHER aus Index ermitteln
+    local rancher_versions
+    rancher_versions=$(
+        { yq e '.entries.rancher[].version' <<< "$rancher_index_yaml"; echo "$CURRENT_RANCHER"; } \
+        | sort -Vu \
+        | awk -v curr="$CURRENT_RANCHER" 'p; $0==curr{p=1}'
+    )
+
+    if [[ -z "${rancher_versions:-}" ]]; then
+        log_warn "Keine neueren Rancher-Versionen gefunden (Basis: ${CURRENT_RANCHER})"
+        return 0
+    fi
+
+    while IFS= read -r rancher_version; do
+        log_verbose "Verarbeite Rancher-Version: ${rancher_version}"
+
+        local kube_version
+        kube_version=$(yq e ".entries.rancher[] | select(.version == \"${rancher_version}\") | .kubeVersion" \
+            <<< "$rancher_index_yaml" | sed 's/ //g')
+
+        local max_rke2
+        max_rke2=$(jq -r --arg rv "v${rancher_version}" '
+            .rke2.releases[]
+            | select(
+                .minChannelServerVersion <= $rv
+                and .maxChannelServerVersion >= $rv
+            )
+            | .version
+        ' "${DATA_FILE}" | sort -V | tail -1) || true
+
+        local rancher_minor
+        rancher_minor=$(echo "${rancher_version}" | cut -d '.' -f 1-2)
+
+        local release_yaml
+        release_yaml=$(curl -s \
+            "https://raw.githubusercontent.com/rancher/charts/release-v${rancher_minor}/index.yaml")
+
+        local row="${rancher_version} ${kube_version:-N/A} ${max_rke2:-N/A}"
+
+        for chart in $CHARTS; do
+            local max_chart_version
+            max_chart_version=$(
+                yq e ".entries[\"${chart}\"][].version" <<< "$release_yaml" 2>/dev/null \
+                | sort -V \
+                | tail -1
+            ) || true
+            row+=" ${max_chart_version:-N/A}"
+        done
+
+        echo "$row"
+    done <<< "$rancher_versions"
+}
+
+main() {
+    log_info "rancher-support-matrix - Rancher Upgrade Support-Matrix"
+
+    parse_arguments "$@"
+
+    # Index-URL aus Channel konstruieren, falls nicht explizit gesetzt
+    if [[ -z "${RANCHER_INDEX_URL}" ]]; then
+        case "${RANCHER_CHANNEL}" in
+            latest|stable|alpha) ;;
+            *)
+                log_error "Ungültiger Channel: ${RANCHER_CHANNEL} (erlaubt: latest, stable, alpha)"
+                exit 1
+                ;;
+        esac
+        RANCHER_INDEX_URL="https://releases.rancher.com/server-charts/${RANCHER_CHANNEL}/index.yaml"
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "Dry-Run: Folgende Schritte würden ausgeführt:"
+        log_info "  1. Abhängigkeiten prüfen (helm, jq, curl, yq)"
+        log_info "  2. Rancher-Daten prüfen/herunterladen: ${DATA_FILE}"
+        log_info "  3. Aktuelle Rancher-Version aus Cluster ermitteln"
+        log_info "  4. Rancher-Index laden: ${RANCHER_INDEX_URL}"
+        log_info "  5. Support-Matrix als Tabelle ausgeben"
+        exit 0
+    fi
+
+    if ! check_dependencies; then
+        exit 1
+    fi
+
+    ensure_data_file
+
+    get_current_rancher
+    log_info "Zeige verfügbare Rancher-Versionen neuer als: ${CURRENT_RANCHER}"
+
+    print_matrix | column -t
+
+    log_success "Support-Matrix vollständig angezeigt"
+}
+
+main "$@"

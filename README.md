@@ -24,6 +24,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 - **[k8s-vuln](./k8s-vuln/)** - Scannt Kubernetes-Cluster auf Sicherheitslücken
 - **[kubectl-backup](./kubectl-backup/)** - Exportiert alle Kubernetes-Ressourcen für Backup und Disaster Recovery
 - **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
+- **[rancher-support-matrix](./rancher-support-matrix/)** - Zeigt Rancher Upgrade Support-Matrix mit kompatiblen K8s-, RKE2- und Chart-Versionen
 
 ### Shell & Terminal
 - **[sync-toolbox-links](./sync-toolbox-links/)** - Symlinks in ~/bin für alle Toolbox-Scripts erstellen und verwalten
@@ -93,7 +94,11 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    # Namespace-Logs exportieren
    cd namespace-logs
    ./namespace-logs -n production -s "2025-08-25T13:00:00Z" -e "2025-08-25T14:00:00Z" -o ./logs
-   
+
+   # Rancher Upgrade-Matrix anzeigen
+   cd rancher-support-matrix
+   ./rancher-support-matrix
+
    # Lima Kubernetes Cluster starten
    cd lima-k8s
    ./lima-k8s start k8s
@@ -155,6 +160,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 🎬 youtube-to-obsidian | ✅ **Ready** | YouTube zu Obsidian Video-Zusammenfassungs-Generator |
 | 🔗 sync-toolbox-links | ✅ **Ready** | Toolbox-Symlinks in ~/bin verwalten |
 | 📜 timestamped-history | ✅ **Ready** | Bash-History mit Timestamps anzeigen |
+| 🐄 rancher-support-matrix | ✅ **Ready** | Rancher Upgrade Support-Matrix Anzeige |
 
 **Legende:**
 - ✅ **Ready** - Vollständig überarbeitet, dokumentiert und einsatzbereit
@@ -256,6 +262,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | youtube-to-obsidian | `yt-dlp`, `claude`, `python3` | `brew install yt-dlp claude-code` |
 | sync-toolbox-links | `bash` 4+, `find` | `brew install bash` |
 | timestamped-history | `awk` | Meist vorinstalliert |
+| rancher-support-matrix | `helm`, `jq`, `curl`, `yq` | `brew install helm jq curl yq` |
 
 ## 🤝 Beitragen
 
@@ -304,6 +311,7 @@ tool_name/
 - **udm-backup**: 📡 Benötigt SSH-Zugriff zur UniFi Dream Machine
 - **youtube-to-obsidian**: 🎬 Nutzt Claude CLI - keine API-Kosten, erfordert Claude Code/Desktop
 - **timestamped-history**: 📜 Liest ~/.bash_history - enthält möglicherweise sensible Befehlsargumente (Passwörter, Tokens)
+- **rancher-support-matrix**: 🐄 Fragt GitHub-API und Helm-Repositories ab - unterliegt GitHub Rate-Limits (60 req/h ohne Token)
 
 ## 📄 Lizenz
 
