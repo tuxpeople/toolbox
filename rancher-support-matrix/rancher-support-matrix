@@ -13,6 +13,7 @@ CHARTS="rancher-backup rancher-monitoring rancher-logging longhorn rancher-compl
 RANCHER_CHANNEL="stable"
 RANCHER_INDEX_URL=""
 CURRENT_RANCHER=""
+TARGET_VERSION=""
 FORCE_REFRESH=false
 VERBOSE=false
 DRY_RUN=false
@@ -54,12 +55,17 @@ VERWENDUNG:
     $0 [OPTIONEN]
 
 BESCHREIBUNG:
-    Zeigt verfügbare Rancher-Versionen (neuer als die aktuell installierte)
-    mit kompatiblen Kubernetes-Versionen, maximaler RKE2-Version und den
-    neusten Chart-Versionen für rancher-backup, rancher-monitoring,
-    rancher-logging, longhorn und rancher-compliance.
+    Zeigt Rancher-Versionen mit kompatiblen Kubernetes-Versionen, maximaler
+    RKE2-Version und neusten Chart-Versionen für rancher-backup,
+    rancher-monitoring, rancher-logging, longhorn und rancher-compliance.
+
+    Standardmässig werden alle Versionen neuer als die aktuell installierte
+    angezeigt. Mit --version kann eine bestimmte Version abgefragt werden.
 
 OPTIONEN:
+    -V, --version VER        Werte für eine bestimmte Rancher-Version anzeigen.
+                             "current" liest die installierte Version aus dem
+                             Cluster und zeigt deren Werte an.
     -c, --channel CHANNEL    Release-Channel: latest, stable, alpha
                              (Standard: ${RANCHER_CHANNEL})
     -u, --index-url URL      Vollständige Index-URL, überschreibt --channel
@@ -77,7 +83,9 @@ UMGEBUNGSVARIABLEN:
     KUBECONFIG               Pfad zur kubectl-Konfiguration
 
 BEISPIELE:
-    $0                           # Standard (Community, stable Channel)
+    $0                           # Alle Versionen neuer als installiert
+    $0 --version 2.10.3          # Werte für Version 2.10.3 anzeigen
+    $0 --version current         # Werte für aktuell installierte Version
     $0 --channel latest          # Latest-Channel verwenden
     $0 --channel alpha           # Alpha-Channel verwenden
     $0 --index-url URL           # Eigene Index-URL (z.B. für Rancher Prime)
@@ -121,6 +129,10 @@ check_dependencies() {
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            -V|--version)
+                TARGET_VERSION="$2"
+                shift 2
+                ;;
             -c|--channel)
                 RANCHER_CHANNEL="$2"
                 shift 2
@@ -234,17 +246,20 @@ print_matrix() {
         return 1
     fi
 
-    # Versionen > CURRENT_RANCHER aus Index ermitteln
+    # Versions-Liste bestimmen
     local rancher_versions
-    rancher_versions=$(
-        { yq e '.entries.rancher[].version' <<< "$rancher_index_yaml"; echo "$CURRENT_RANCHER"; } \
-        | sort -Vu \
-        | awk -v curr="$CURRENT_RANCHER" 'p; $0==curr{p=1}'
-    )
-
-    if [[ -z "${rancher_versions:-}" ]]; then
-        log_warn "Keine neueren Rancher-Versionen gefunden (Basis: ${CURRENT_RANCHER})"
-        return 0
+    if [[ -n "${TARGET_VERSION}" ]]; then
+        rancher_versions="${TARGET_VERSION}"
+    else
+        rancher_versions=$(
+            { yq e '.entries.rancher[].version' <<< "$rancher_index_yaml"; echo "$CURRENT_RANCHER"; } \
+            | sort -Vu \
+            | awk -v curr="$CURRENT_RANCHER" 'p; $0==curr{p=1}'
+        )
+        if [[ -z "${rancher_versions:-}" ]]; then
+            log_warn "Keine neueren Rancher-Versionen gefunden (Basis: ${CURRENT_RANCHER})"
+            return 0
+        fi
     fi
 
     while IFS= read -r rancher_version; do
@@ -308,9 +323,14 @@ main() {
         log_info "Dry-Run: Folgende Schritte würden ausgeführt:"
         log_info "  1. Abhängigkeiten prüfen (helm, jq, curl, yq)"
         log_info "  2. Rancher-Daten prüfen/herunterladen: ${DATA_FILE}"
-        log_info "  3. Aktuelle Rancher-Version aus Cluster ermitteln"
-        log_info "  4. Rancher-Index laden: ${RANCHER_INDEX_URL}"
-        log_info "  5. Support-Matrix als Tabelle ausgeben"
+        if [[ -n "${TARGET_VERSION}" ]]; then
+            log_info "  3. Werte für Version: ${TARGET_VERSION}"
+        else
+            log_info "  3. Aktuelle Rancher-Version aus Cluster ermitteln"
+            log_info "  4. Alle neueren Versionen aus Index filtern"
+        fi
+        log_info "  . Rancher-Index laden: ${RANCHER_INDEX_URL}"
+        log_info "  . Support-Matrix als Tabelle ausgeben"
         exit 0
     fi
 
@@ -320,8 +340,16 @@ main() {
 
     ensure_data_file
 
-    get_current_rancher
-    log_info "Zeige verfügbare Rancher-Versionen neuer als: ${CURRENT_RANCHER}"
+    if [[ "${TARGET_VERSION}" == "current" ]]; then
+        get_current_rancher
+        TARGET_VERSION="${CURRENT_RANCHER}"
+        log_info "Zeige Werte für aktuell installierte Version: ${TARGET_VERSION}"
+    elif [[ -n "${TARGET_VERSION}" ]]; then
+        log_info "Zeige Werte für Version: ${TARGET_VERSION}"
+    else
+        get_current_rancher
+        log_info "Zeige verfügbare Rancher-Versionen neuer als: ${CURRENT_RANCHER}"
+    fi
 
     print_matrix | column -t
 
