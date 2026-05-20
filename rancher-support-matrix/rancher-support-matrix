@@ -17,6 +17,7 @@ TARGET_VERSION=""
 FORCE_REFRESH=false
 VERBOSE=false
 DRY_RUN=false
+QUIET=false
 OUTPUT_FORMAT="table"
 
 # Farben für Output
@@ -27,14 +28,17 @@ BLUE='\033[0;34m'
 NC='\033[0m'  # No Color
 
 log_info() {
+    [[ "$QUIET" == "true" ]] && return 0
     echo -e "${BLUE}[INFO]${NC} $1" >&2
 }
 
 log_success() {
+    [[ "$QUIET" == "true" ]] && return 0
     echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
 }
 
 log_warn() {
+    [[ "$QUIET" == "true" ]] && return 0
     echo -e "${YELLOW}[WARN]${NC} $1" >&2
 }
 
@@ -77,6 +81,7 @@ OPTIONEN:
     -b, --base-version VER   Basis-Rancher-Version wenn kein Cluster erreichbar
                              (Standard: ${FALLBACK_RANCHER})
     -o, --output FORMAT      Ausgabeformat: table, json (Standard: table)
+    -q, --quiet              Nur Fehler ausgeben (kein Info/Warn/Success-Output)
     -v, --verbose            Detaillierte Ausgabe
     -n, --dry-run            Nur anzeigen was gemacht würde
     -h, --help               Diese Hilfe anzeigen
@@ -95,6 +100,8 @@ BEISPIELE:
     $0 --index-url URL           # Eigene Index-URL (z.B. für Rancher Prime)
     $0 --refresh                 # Mit frisch heruntergeladenen Daten
     $0 --verbose                 # Mit detaillierter Ausgabe
+    $0 --quiet                   # Nur Fehler ausgeben (kein Info/Warn-Output)
+    $0 --quiet --output json     # Maschinenlesbarer Output ohne Log-Rauschen
     $0 --base-version 2.8.0      # Versionen ab 2.8.0 anzeigen
 
 VORAUSSETZUNGEN:
@@ -160,6 +167,10 @@ parse_arguments() {
             -o|--output)
                 OUTPUT_FORMAT="$2"
                 shift 2
+                ;;
+            -q|--quiet)
+                QUIET=true
+                shift
                 ;;
             -v|--verbose)
                 VERBOSE=true
@@ -331,9 +342,9 @@ print_matrix() {
 }
 
 main() {
-    log_info "rancher-support-matrix - Rancher Upgrade Support-Matrix"
-
     parse_arguments "$@"
+
+    log_info "rancher-support-matrix - Rancher Upgrade Support-Matrix"
 
     # Ausgabeformat validieren
     case "${OUTPUT_FORMAT}" in
