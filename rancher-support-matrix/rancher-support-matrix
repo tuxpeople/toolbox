@@ -17,6 +17,7 @@ TARGET_VERSION=""
 FORCE_REFRESH=false
 VERBOSE=false
 DRY_RUN=false
+OUTPUT_FORMAT="table"
 
 # Farben für Output
 RED='\033[0;31m'
@@ -75,6 +76,7 @@ OPTIONEN:
                              (Standard: ~/Downloads/rancher-data.json)
     -b, --base-version VER   Basis-Rancher-Version wenn kein Cluster erreichbar
                              (Standard: ${FALLBACK_RANCHER})
+    -o, --output FORMAT      Ausgabeformat: table, json (Standard: table)
     -v, --verbose            Detaillierte Ausgabe
     -n, --dry-run            Nur anzeigen was gemacht würde
     -h, --help               Diese Hilfe anzeigen
@@ -84,8 +86,10 @@ UMGEBUNGSVARIABLEN:
 
 BEISPIELE:
     $0                           # Alle Versionen neuer als installiert
+    $0 --output json             # JSON-Ausgabe für Weiterverarbeitung
     $0 --version 2.10.3          # Werte für Version 2.10.3 anzeigen
     $0 --version current         # Werte für aktuell installierte Version
+    $0 --version 2.10.3 --output json | jq '.[]'  # JSON für eine Version
     $0 --channel latest          # Latest-Channel verwenden
     $0 --channel alpha           # Alpha-Channel verwenden
     $0 --index-url URL           # Eigene Index-URL (z.B. für Rancher Prime)
@@ -151,6 +155,10 @@ parse_arguments() {
                 ;;
             -b|--base-version)
                 FALLBACK_RANCHER="$2"
+                shift 2
+                ;;
+            -o|--output)
+                OUTPUT_FORMAT="$2"
                 shift 2
                 ;;
             -v|--verbose)
@@ -230,12 +238,14 @@ ensure_data_file() {
 }
 
 print_matrix() {
-    # Header-Zeile aufbauen (tr statt ${var^^} für bash 3 Kompatibilität)
-    local header="RANCHER_VERSION KUBE_VERSION_CONSTRAINT MAX_RKE2"
-    for chart in $CHARTS; do
-        header+=" $(echo "$chart" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
-    done
-    echo "$header"
+    # Header nur für Tabellen-Ausgabe
+    if [[ "${OUTPUT_FORMAT}" != "json" ]]; then
+        local header="RANCHER_VERSION KUBE_VERSION_CONSTRAINT MAX_RKE2"
+        for chart in $CHARTS; do
+            header+=" $(echo "$chart" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
+        done
+        echo "$header"
+    fi
 
     # Rancher-Index einmal laden
     local rancher_index_yaml
@@ -267,7 +277,7 @@ print_matrix() {
 
         local kube_version
         kube_version=$(yq e ".entries.rancher[] | select(.version == \"${rancher_version}\") | .kubeVersion" \
-            <<< "$rancher_index_yaml" | sed 's/ //g')
+            <<< "$rancher_index_yaml")
 
         local max_rke2
         max_rke2=$(jq -r --arg rv "v${rancher_version}" '
@@ -286,7 +296,9 @@ print_matrix() {
         release_yaml=$(curl -s \
             "https://raw.githubusercontent.com/rancher/charts/release-v${rancher_minor}/index.yaml")
 
-        local row="${rancher_version} ${kube_version:-N/A} ${max_rke2:-N/A}"
+        # Chart-Versionen sammeln; für JSON auch Objekt aufbauen
+        local charts_json="{}"
+        local row="${rancher_version} $(echo "${kube_version:-N/A}" | sed 's/ //g') ${max_rke2:-N/A}"
 
         for chart in $CHARTS; do
             local max_chart_version
@@ -296,9 +308,25 @@ print_matrix() {
                 | tail -1
             ) || true
             row+=" ${max_chart_version:-N/A}"
+            if [[ "${OUTPUT_FORMAT}" == "json" ]]; then
+                charts_json=$(jq -n \
+                    --argjson obj "$charts_json" \
+                    --arg k "$chart" \
+                    --arg v "${max_chart_version:-N/A}" \
+                    '$obj + {($k): $v}')
+            fi
         done
 
-        echo "$row"
+        if [[ "${OUTPUT_FORMAT}" == "json" ]]; then
+            jq -n \
+                --arg rv "$rancher_version" \
+                --arg kv "${kube_version:-N/A}" \
+                --arg rke2 "${max_rke2:-N/A}" \
+                --argjson charts "$charts_json" \
+                '{rancher_version: $rv, kube_version_constraint: $kv, max_rke2: $rke2, charts: $charts}'
+        else
+            echo "$row"
+        fi
     done <<< "$rancher_versions"
 }
 
@@ -306,6 +334,15 @@ main() {
     log_info "rancher-support-matrix - Rancher Upgrade Support-Matrix"
 
     parse_arguments "$@"
+
+    # Ausgabeformat validieren
+    case "${OUTPUT_FORMAT}" in
+        table|json) ;;
+        *)
+            log_error "Ungültiges Ausgabeformat: ${OUTPUT_FORMAT} (erlaubt: table, json)"
+            exit 1
+            ;;
+    esac
 
     # Index-URL aus Channel konstruieren, falls nicht explizit gesetzt
     if [[ -z "${RANCHER_INDEX_URL}" ]]; then
@@ -330,7 +367,7 @@ main() {
             log_info "  4. Alle neueren Versionen aus Index filtern"
         fi
         log_info "  . Rancher-Index laden: ${RANCHER_INDEX_URL}"
-        log_info "  . Support-Matrix als Tabelle ausgeben"
+        log_info "  . Support-Matrix als ${OUTPUT_FORMAT} ausgeben"
         exit 0
     fi
 
@@ -351,7 +388,11 @@ main() {
         log_info "Zeige verfügbare Rancher-Versionen neuer als: ${CURRENT_RANCHER}"
     fi
 
-    print_matrix | column -t
+    if [[ "${OUTPUT_FORMAT}" == "json" ]]; then
+        print_matrix | jq -s '.'
+    else
+        print_matrix | column -t
+    fi
 
     log_success "Support-Matrix vollständig angezeigt"
 }
