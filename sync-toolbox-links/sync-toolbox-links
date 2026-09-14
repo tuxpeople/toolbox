@@ -10,7 +10,15 @@ set -euo pipefail
 # ---------------------------------
 
 # ROOT automatisch aus dem eigenen Standort im Repo ableiten
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# (Symlinks werden aufgelöst, damit z.B. ein Aufruf über ~/bin/sync-toolbox-links
+# auf das Repo zeigt statt auf ~/bin)
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 ROOT="${ROOT:-$(dirname "$SCRIPT_DIR")}"
 BIN="${BIN:-$HOME/bin}"
 
