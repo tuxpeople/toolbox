@@ -39,6 +39,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 ### System & Text Processing
 - **[check-repo-checksum](./check-repo-checksum/)** - Prüft RPM-Paket-Prüfsummen gegen Repository-Metadaten
 - **[sanitize-text](./sanitize-text/)** - Säubert Text-Dateien von speziellen Unicode-Zeichen
+- **[count-extensions](./count-extensions/)** - Zählt rekursiv Dateiendungen in einem Verzeichnis und sortiert nach Häufigkeit
 
 ### Network & Backup
 - **[udm-backup](./udm-backup/)** - UniFi Dream Machine Backup-Tool
@@ -123,6 +124,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd sanitize-text
    ./sanitize-text document.txt
 
+   # Dateiendungen in einem Verzeichnis zählen
+   cd count-extensions
+   ./count-extensions ~/projects/toolbox --top 10
+
    # Bash-History mit Timestamps anzeigen
    cd timestamped-history
    ./timestamped-history -n 50
@@ -155,6 +160,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 📦 check-repo-checksum | ✅ **Ready** | RPM Repository Checksum Validator |
 | 📄 pdf-split | ✅ **Ready** | PDF Seiten-Splitter |
 | 📝 sanitize-text | ✅ **Ready** | Text Unicode Sanitizer |
+| 🔢 count-extensions | ✅ **Ready** | Dateiendungen zählen und sortieren |
 | 📡 udm-backup | ✅ **Ready** | UniFi Dream Machine Backup-Tool |
 | 📺 yt-get | ✅ **Ready** | yt-dlp Wrapper für Video/Audio Downloads |
 | 🎬 youtube-to-obsidian | ✅ **Ready** | YouTube zu Obsidian Video-Zusammenfassungs-Generator |
@@ -257,6 +263,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | check-repo-checksum | `curl`, `gawk`, `grep`, `sed`, `gunzip`, `sha256sum` | `brew install coreutils gawk grep gnu-sed gzip` |
 | pdf-split | `python3` mit venv | `brew install python3` |
 | sanitize-text | `python3` (3.6+) | `brew install python3` |
+| count-extensions | `find`, `sort`, `uniq`, `tr`, `awk` | Meist vorinstalliert |
 | udm-backup | `ssh`, `scp`, `jq` | `brew install jq` |
 | yt-get | `yt-dlp`, `ffmpeg` | `pip install yt-dlp && brew install ffmpeg` |
 | youtube-to-obsidian | `yt-dlp`, `claude`, `python3` | `brew install yt-dlp claude-code` |
