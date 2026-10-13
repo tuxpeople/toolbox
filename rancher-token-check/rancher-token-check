@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+
+# rancher-token-check - Restlaufzeit des Rancher-Tokens einer Kubeconfig prüfen
+# Liest das Token der aktuellen Kubeconfig, ermittelt über das zugehörige Secret
+# im Namespace cattle-tokens die Ablaufzeit und erstellt bei Bedarf eine neue
+# Kubeconfig über die Rancher ext-API (ext.cattle.io/v1 Kubeconfig).
+
+set -euo pipefail
+
+# Globale Variablen
+TOKEN_NAMESPACE="cattle-tokens"
+THRESHOLD_DAYS=3
+OUTPUT_DIR="$(pwd)"
+KUBECONFIG_DESCRIPTION="Erstellt von rancher-token-check"
+KUBECTL_ARGS=()
+VERBOSE=false
+DRY_RUN=false
+FORCE=false
+NO_RENEW=false
+
+# Exit-Codes
+EXIT_EXPIRING=2
+EXIT_EXPIRED=3
+
+# Farben für Output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'  # No Color
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+log_verbose() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[VERBOSE]${NC} $1" >&2
+    fi
+}
+
+show_help() {
+    cat << EOF
+rancher-token-check - Restlaufzeit des Rancher-Tokens einer Kubeconfig prüfen
+
+VERWENDUNG:
+    $0 [OPTIONEN]
+
+BESCHREIBUNG:
+    Liest das Token aus der aktuellen Kubeconfig (bzw. dem gewählten Context),
+    sucht das zugehörige Secret im Namespace ${TOKEN_NAMESPACE} und berechnet
+    aus last-update-time und ttl die verbleibende Gültigkeit.
+
+    Läuft das Token in weniger als ${THRESHOLD_DAYS} Tagen ab (oder ist bereits
+    abgelaufen), wird angeboten, über die Rancher ext-API eine neue Kubeconfig
+    zu erstellen. Diese wird mit Zeitstempel im Ausgabeverzeichnis abgelegt,
+    bestehende Dateien werden nie überschrieben.
+
+OPTIONEN:
+    -k, --kubeconfig DATEI   Zu prüfende Kubeconfig (Standard: \$KUBECONFIG
+                             bzw. ~/.kube/config)
+    -c, --context NAME       Context in der Kubeconfig (Standard: aktueller)
+    -t, --threshold TAGE     Warnschwelle in Tagen (Standard: ${THRESHOLD_DAYS})
+    -o, --output-dir DIR     Zielverzeichnis für neue Kubeconfig
+                             (Standard: aktuelles Verzeichnis)
+    -d, --description TEXT   Beschreibung der neuen Kubeconfig in Rancher
+    -N, --no-renew           Nur prüfen, nie eine neue Kubeconfig erstellen
+    -f, --force              Neue Kubeconfig ohne Nachfrage erstellen,
+                             wenn die Warnschwelle unterschritten ist
+    -v, --verbose            Detaillierte Ausgabe
+    -n, --dry-run            Nur anzeigen was gemacht würde
+    -h, --help               Diese Hilfe anzeigen
+
+UMGEBUNGSVARIABLEN:
+    KUBECONFIG               Pfad zur kubectl-Konfiguration
+
+EXIT-CODES:
+    0                        Token länger als Warnschwelle gültig
+                             (oder neue Kubeconfig erfolgreich erstellt)
+    1                        Allgemeiner Fehler
+    ${EXIT_EXPIRING}                        Token läuft innerhalb der Warnschwelle ab
+    ${EXIT_EXPIRED}                        Token ist bereits abgelaufen
+
+BEISPIELE:
+    $0                               # Aktuelle Kubeconfig prüfen
+    $0 -k ~/Downloads/local.yaml     # Bestimmte Kubeconfig prüfen
+    $0 --no-renew -t 7               # Nur prüfen, Warnung ab 7 Tagen
+    $0 --force -o ~/.kube            # Bei Bedarf ohne Nachfrage erneuern
+    $0 --dry-run --verbose           # Testlauf mit Details
+
+VORAUSSETZUNGEN:
+    - kubectl muss installiert sein
+    - Rancher v2.12+ mit ext-Tokens (Secrets in ${TOKEN_NAMESPACE})
+    - Leserechte auf das eigene Token-Secret im Management-Cluster (local)
+
+HINWEISE:
+    - Neue Kubeconfigs enthalten Zugangsdaten - Dateien werden mit 600 angelegt
+    - Zum Erneuern muss das aktuelle Token noch gültig sein
+EOF
+}
+
+check_dependencies() {
+    local missing_deps=()
+
+    for dep in kubectl base64 date; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_info "Installation:"
+        log_info "  macOS: brew install ${missing_deps[*]}"
+        log_info "  Linux: apt install ${missing_deps[*]} oder yum install ${missing_deps[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -k|--kubeconfig|-c|--context|-t|--threshold|-o|--output-dir|-d|--description)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option $1 benötigt einen Wert"
+                    exit 1
+                fi
+                case $1 in
+                    -k|--kubeconfig)  KUBECTL_ARGS+=(--kubeconfig "$2") ;;
+                    -c|--context)     KUBECTL_ARGS+=(--context "$2") ;;
+                    -t|--threshold)   THRESHOLD_DAYS="$2" ;;
+                    -o|--output-dir)  OUTPUT_DIR="$2" ;;
+                    -d|--description) KUBECONFIG_DESCRIPTION="$2" ;;
+                esac
+                shift 2
+                ;;
+            -N|--no-renew)
+                NO_RENEW=true
+                shift
+                ;;
+            -f|--force)
+                FORCE=true
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unbekannte Option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+validate_parameters() {
+    if ! [[ "$THRESHOLD_DAYS" =~ ^[0-9]+$ ]]; then
+        log_error "--threshold erwartet eine positive Zahl, erhalten: $THRESHOLD_DAYS"
+        return 1
+    fi
+
+    if [[ "$NO_RENEW" == "true" && "$FORCE" == "true" ]]; then
+        log_error "--no-renew und --force schliessen sich gegenseitig aus"
+        return 1
+    fi
+
+    if [[ "$NO_RENEW" != "true" && ! -d "$OUTPUT_DIR" ]]; then
+        log_error "Verzeichnis existiert nicht: $OUTPUT_DIR"
+        return 1
+    fi
+
+    return 0
+}
+
+# kubectl mit den gewählten --kubeconfig/--context Optionen aufrufen
+kube() {
+    kubectl ${KUBECTL_ARGS[@]+"${KUBECTL_ARGS[@]}"} "$@"
+}
+
+# Base64 dekodieren (GNU: -d, ältere macOS-Versionen: -D)
+b64_decode() {
+    base64 -d 2>/dev/null || base64 -D
+}
+
+# ISO-8601 UTC-Zeitstempel (z.B. 2025-10-01T14:20:00Z) in Unix-Epoch umwandeln
+iso_to_epoch() {
+    local ts="$1"
+    # Bruchteile von Sekunden und Zeitzonen-Suffix entfernen
+    ts="${ts%Z}"
+    ts="${ts%%.*}"
+
+    if command -v gdate &> /dev/null; then
+        gdate -u -d "$ts" +%s
+    elif date -u -d "$ts" +%s &> /dev/null; then
+        date -u -d "$ts" +%s
+    else
+        # BSD date (macOS)
+        date -u -j -f "%Y-%m-%dT%H:%M:%S" "$ts" +%s
+    fi
+}
+
+format_duration() {
+    local seconds="$1"
+    printf '%dT %dStd %dMin %dSek' \
+        $((seconds / 86400)) $(((seconds % 86400) / 3600)) \
+        $(((seconds % 3600) / 60)) $((seconds % 60))
+}
+
+# Secret-Namen aus dem Token des aktuellen Contexts ermitteln
+# Format: [ext/]<name>:<secret>, z.B. "ext/token-m428s:abc..." -> "token-m428s"
+get_secret_name() {
+    local token
+    token=$(kube config view --raw --minify -o jsonpath='{.users[0].user.token}' 2>/dev/null) || true
+
+    if [[ -z "$token" ]]; then
+        log_error "Kein Token in der aktuellen Kubeconfig gefunden"
+        return 1
+    fi
+
+    token="${token##*/}"
+    printf '%s' "${token%%:*}"
+}
+
+# Neue Kubeconfig über die Rancher ext-API erstellen
+create_kubeconfig() {
+    local output_file
+    output_file="${OUTPUT_DIR%/}/kubeconfig-rancher-$(date +%Y%m%d-%H%M%S).yaml"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Würde neue Kubeconfig erstellen: $output_file"
+        return 0
+    fi
+
+    if [[ -e "$output_file" ]]; then
+        log_error "Datei existiert bereits: $output_file"
+        return 1
+    fi
+
+    log_verbose "Erstelle Kubeconfig-Objekt (ext.cattle.io/v1)"
+    (
+        umask 077
+        kube create -o jsonpath='{.status.value}' -f - > "$output_file" 2>/dev/null <<EOF
+apiVersion: ext.cattle.io/v1
+kind: Kubeconfig
+spec:
+  clusters: ["*"]
+  description: "${KUBECONFIG_DESCRIPTION//\"/\\\"}"
+EOF
+    ) || true
+
+    if [[ ! -s "$output_file" ]]; then
+        rm -f "$output_file"
+        log_error "Fehler beim Generieren der Kubeconfig (Token noch gültig? Rechte vorhanden?)"
+        return 1
+    fi
+
+    log_success "Neue Kubeconfig erstellt: $output_file"
+    log_info "Verwenden mit: export KUBECONFIG=$output_file"
+    return 0
+}
+
+# Fragt nach, ob eine neue Kubeconfig erstellt werden soll
+confirm_renew() {
+    local answer
+
+    if [[ "$FORCE" == "true" || "$DRY_RUN" == "true" ]]; then
+        return 0
+    fi
+
+    if [[ ! -t 0 ]]; then
+        log_warn "Keine interaktive Eingabe möglich - mit --force ohne Nachfrage erneuern"
+        return 1
+    fi
+
+    read -r -p "Möchtest du eine neue Kubeconfig erstellen? (j/n): " answer
+    [[ "$answer" =~ ^[JjYy]$ ]]
+}
+
+main() {
+    parse_arguments "$@"
+
+    if ! check_dependencies; then
+        exit 1
+    fi
+
+    if ! validate_parameters; then
+        exit 1
+    fi
+
+    # 1. Secret-Namen aus dem Token ermitteln
+    local secret_name
+    secret_name=$(get_secret_name) || exit 1
+    log_verbose "Token-Secret: ${TOKEN_NAMESPACE}/${secret_name}"
+
+    # 2. Felder aus dem Secret auslesen und dekodieren
+    local raw last_update_b64 ttl_b64 last_update ttl_ms
+    raw=$(kube get secret "$secret_name" -n "$TOKEN_NAMESPACE" \
+        -o jsonpath='{.data.last-update-time}{" "}{.data.ttl}' 2>/dev/null) || true
+    read -r last_update_b64 ttl_b64 <<< "$raw" || true
+
+    if [[ -z "${last_update_b64:-}" || -z "${ttl_b64:-}" ]]; then
+        log_error "Konnte Secret '$secret_name' im Namespace '$TOKEN_NAMESPACE' nicht auslesen"
+        log_info "Bitte sicherstellen, dass die Kubeconfig auf den Management-Cluster (local) zeigt"
+        log_info "und die nötigen Rechte vorhanden sind"
+        exit 1
+    fi
+
+    last_update=$(printf '%s' "$last_update_b64" | b64_decode)
+    ttl_ms=$(printf '%s' "$ttl_b64" | b64_decode)
+    log_verbose "last-update-time: $last_update, ttl: ${ttl_ms}ms"
+
+    if ! [[ "$ttl_ms" =~ ^-?[0-9]+$ ]]; then
+        log_error "Ungültiger TTL-Wert im Secret: $ttl_ms"
+        exit 1
+    fi
+
+    if [[ "$ttl_ms" -le 0 ]]; then
+        log_success "Token hat keine Ablaufzeit (ttl=${ttl_ms})"
+        exit 0
+    fi
+
+    # 3. Ablaufzeit berechnen
+    local start_epoch now_epoch end_epoch remaining threshold_seconds
+    if ! start_epoch=$(iso_to_epoch "$last_update"); then
+        log_error "Zeitstempel konnte nicht verarbeitet werden: $last_update"
+        exit 1
+    fi
+    now_epoch=$(date -u +%s)
+    end_epoch=$((start_epoch + ttl_ms / 1000))
+    remaining=$((end_epoch - now_epoch))
+    threshold_seconds=$((THRESHOLD_DAYS * 86400))
+    log_verbose "Ablauf (Epoch): $end_epoch, jetzt: $now_epoch"
+
+    # 4. Auswertung
+    local status=0
+    if [[ $remaining -le 0 ]]; then
+        log_error "Das Token ist seit $(format_duration $((-remaining))) abgelaufen"
+        status=$EXIT_EXPIRED
+    else
+        # Ergebnis auf stdout, damit es weiterverarbeitet werden kann
+        echo "Verbleibende Gültigkeit: $(format_duration "$remaining")"
+        if [[ $remaining -lt $threshold_seconds ]]; then
+            log_warn "Token ist weniger als ${THRESHOLD_DAYS} Tage gültig"
+            status=$EXIT_EXPIRING
+        else
+            log_success "Token ist noch länger als ${THRESHOLD_DAYS} Tage gültig"
+        fi
+    fi
+
+    # 5. Bei Bedarf neue Kubeconfig erstellen
+    if [[ $status -ne 0 && "$NO_RENEW" != "true" ]]; then
+        if [[ $status -eq $EXIT_EXPIRED ]]; then
+            log_warn "Mit einem abgelaufenen Token schlägt das Erneuern vermutlich fehl"
+        fi
+
+        if confirm_renew; then
+            if create_kubeconfig; then
+                [[ "$DRY_RUN" == "true" ]] || status=0
+            fi
+        else
+            log_info "Kubeconfig wurde nicht erneuert"
+        fi
+    fi
+
+    exit "$status"
+}
+
+# Script-Ausführung
+main "$@"

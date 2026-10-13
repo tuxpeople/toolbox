@@ -26,6 +26,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 - **[namespace-logs](./namespace-logs/)** - Exportiert alle Container-Logs eines Kubernetes-Namespaces
 - **[rancher-support-matrix](./rancher-support-matrix/)** - Zeigt Rancher Upgrade Support-Matrix mit kompatiblen K8s-, RKE2- und Chart-Versionen
 - **[get-kubeconfig-from-rancher](./get-kubeconfig-from-rancher/)** - Exportiert die Kubeconfigs aller Cluster aller konfigurierten Rancher-Server
+- **[rancher-token-check](./rancher-token-check/)** - Prüft die Restlaufzeit des Rancher-Tokens einer Kubeconfig und erneuert sie bei Bedarf
 
 ### Shell & Terminal
 - **[sync-toolbox-links](./sync-toolbox-links/)** - Symlinks in ~/bin für alle Toolbox-Scripts erstellen und verwalten
@@ -105,6 +106,10 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
    cd get-kubeconfig-from-rancher
    ./get-kubeconfig-from-rancher -o ~/.kube/rancher
 
+   # Restlaufzeit des Rancher-Tokens prüfen
+   cd rancher-token-check
+   ./rancher-token-check -k ~/.kube/rancher.yaml
+
    # Lima Kubernetes Cluster starten
    cd lima-k8s
    ./lima-k8s start k8s
@@ -173,6 +178,7 @@ Eine Sammlung nützlicher Scripts und Tools für DevOps, SysAdmin und Container-
 | 📜 timestamped-history | ✅ **Ready** | Bash-History mit Timestamps anzeigen |
 | 🐄 rancher-support-matrix | ✅ **Ready** | Rancher Upgrade Support-Matrix Anzeige |
 | 🔐 get-kubeconfig-from-rancher | ✅ **Ready** | Rancher Kubeconfig Exporter |
+| ⏱️ rancher-token-check | ✅ **Ready** | Rancher Token-Ablauf Prüfung und Erneuerung |
 
 **Legende:**
 - ✅ **Ready** - Vollständig überarbeitet, dokumentiert und einsatzbereit
@@ -277,6 +283,7 @@ find . -type f -perm +111 -exec chmod +x {} \;
 | timestamped-history | `awk` | Meist vorinstalliert |
 | rancher-support-matrix | `helm`, `jq`, `curl`, `yq` | `brew install helm jq curl yq` |
 | get-kubeconfig-from-rancher | `rancher` | `brew install rancher-cli` |
+| rancher-token-check | `kubectl` | `brew install kubectl` |
 
 ## 🤝 Beitragen
 
@@ -327,6 +334,7 @@ tool_name/
 - **timestamped-history**: 📜 Liest ~/.bash_history - enthält möglicherweise sensible Befehlsargumente (Passwörter, Tokens)
 - **rancher-support-matrix**: 🐄 Fragt GitHub-API und Helm-Repositories ab - unterliegt GitHub Rate-Limits (60 req/h ohne Token)
 - **get-kubeconfig-from-rancher**: 🔐 Schreibt Kubeconfigs mit Rancher-Tokens - Ausgabeverzeichnis (Standard: iCloud Drive) bewusst wählen
+- **rancher-token-check**: ⏱️ Liest Token-Secrets im Management-Cluster und erstellt auf Wunsch neue Kubeconfigs mit Zugangsdaten - alte Tokens werden nicht widerrufen
 
 ## 📄 Lizenz
 
